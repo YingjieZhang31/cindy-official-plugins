@@ -1,5 +1,35 @@
 # Simulator gesture parity and native trackpad acceptance
 
+## Single-touch compatibility follow-up — 0.2.60, 2026-10-28
+
+Chromium's contact path omitted the legacy iPhone single-touch edge hint.
+A newly-down single finger now uses the existing orientation-aware EdgeBands
+classifier (0.85/0.15), with the same real coordinates. That stream's options
+follow down/move/up and the existing release path clears them on cancel, blur,
+pagehide, detach, invalid mapping or contact-count changes. Atomic pairs receive
+no edge hint; lifting one finger from a pair does not reclassify its already-down
+survivor. Interior starts do not inherit an earlier hint. No new transport,
+queue, retry, permission, native binary or host mapping was introduced.
+
+Two production-source regressions failed before repair and pass afterward.
+The five native-contacts cases complete in 59.7 ms, including top/bottom and
+orientation, all release paths, single/pair transitions and atomic pair start.
+Repository contracts and simulator files pass 1423 test invocations with zero
+failures/skips (including aggregate/single-file duplication as below). The full
+vendor Web patch reconstructs packaged sources with zero fuzz/offset, inventory
+verification passes, and Forge validates/packs 0.2.60 without installing it.
+
+Real Electron 42.11.12 Chromium/CDP input through the production TouchGestureSource,
+Screen, Transport and GestureEnvelope sends actual local WebSocket messages.
+All 25 orientation × release scenarios preserve the exact edge field on
+touch1-down/move/up. Atomic DOM pair → surviving single → cancel emits
+touch2-down/up then touch1-down/up, with no edge hint. Receipt:
+`pr235-single-edge-receipt.json` in the task artifact directory. This validates
+browser-to-wire compatibility, not SimulatorKit recognition, physical AppKit
+capture or user hand-feel. The existing physical double-contact acceptance and
+0.2.59 wheel/HTTP evidence remain applicable to their unchanged paths; none is
+claimed as a physical retest of this restored single-touch metadata.
+
 ## Edge-indicator follow-up — 0.2.59, 2026-10-28
 
 iPhone wheel pinch previously drew raw offscreen contacts while the native

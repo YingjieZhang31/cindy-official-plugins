@@ -10,6 +10,8 @@ Upstream: [tddworks/baguette v0.2.10](https://github.com/tddworks/baguette/relea
 
 ## Exact source modifications
 
+Plugin 0.2.60 restores Chromium single-touch edge metadata using the same EdgeBands thresholds and orientation helper as the legacy touch path. Stream options survive move/up/cancel and are cleared on release and single/pair transitions. A surviving finger after a pair is not reclassified as a newly-down edge gesture. No native binary, permission, endpoint or new transport mechanism changed; see the repository's gesture verification record for source and runtime evidence.
+
 Plugin 0.2.59 bounds the iPhone wheel-move pair once before both dispatch and overlay projection. The native backend already clips these positions; this fixes only the mismatch in edge indicators. Raw wheel scale, pan limits, native contacts, native binary, permissions and endpoints are unchanged. The regression compares pan/pinch dispatch and overlay at all four edges and three view scales, including reversal and idle clearing. Runtime evidence and limits are in `docs/simulator-gesture-verification.md` in the repository.
 
 Plugin 0.2.28 marks the flat screen for host-native trackpad input and handles Chromium's real TouchEvents in `touch-gesture-source.js` (independent stable contact ordering, immediate movement, explicit release/cancel and detach cleanup). Safari keeps its existing gesture-event source. No new plugin bridge, permission, network target or native executable; Baguette remains v0.2.10. The host owns AppKit capture and delivers standard browser input. Unit tests exercise the production touch source; host runtime tests cover cross-origin/nested frame input. Physical hardware feel remains a separate acceptance check.

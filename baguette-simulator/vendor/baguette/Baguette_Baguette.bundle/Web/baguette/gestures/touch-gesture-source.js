@@ -170,9 +170,11 @@
 
     _bindContacts() {
       let contacts = [];
+      let contactOptions;
       const release = () => {
-        if (contacts.length) this.screen.touchUp(contacts.map(t => t.point));
+        if (contacts.length) this.screen.touchUp(contacts.map(t => t.point), contactOptions);
         contacts = [];
+        contactOptions = undefined;
         this.overlay?.clear();
       };
       this._releaseContacts = release;
@@ -186,10 +188,18 @@
         if (!same) {
           // The simulator's wire format separates single- and two-contact
           // streams. Close the old stream when the number of fingers changes.
+          const singleStart = next.length === 1 && !contacts.some(t => t.id === next[0].id);
           release();
-          if (next.length) this.screen.touchDown(next.map(t => t.point));
+          if (next.length) {
+            // Preserve the legacy edge hint for a newly-down single finger;
+            // lifting one finger of a pair must not invent a new edge gesture.
+            const edge = singleStart ? new root.Baguette._EdgeBands(0.85, 0.15)
+              .classify(next[0].point, this.getOrientation()) : null;
+            contactOptions = edge ? { edge } : undefined;
+            this.screen.touchDown(next.map(t => t.point), contactOptions);
+          }
         } else if (next.length) {
-          this.screen.touchMove(next.map(t => t.point));
+          this.screen.touchMove(next.map(t => t.point), contactOptions);
         }
         contacts = next;
         const r = this._el.getBoundingClientRect();
