@@ -184,8 +184,10 @@ call_tool(name:"community-management get-community-forum-publish-options", args:
 
 ## 最小可跑示例
 
+发帖的「预览」不是 `dry_run`:草稿必须真实创建或更新,`preview_url` 才会出现;`dry_run:true` 只打印请求、不建草稿,拿不到预览链接。所以建/改草稿用 `yes:true` 真正写入,再把 `preview_url` 交给用户;发布必须等用户看过预览并明确同意后再执行。
+
 ```text
-# 1) 建草稿(展平字段;先 dry_run:true 预览)
+# 1) 建草稿(展平字段):真实创建才会返回 preview_url
 call_tool(name:"community-management create-community-topic-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{title:"…", contents:"[{\"type\":\"paragraph\",\"children\":[{\"text\":\"…\"}]}]",
@@ -193,7 +195,7 @@ call_tool(name:"community-management create-community-topic-draft", args:{
                         honor:{mode:"inherit"}}]},
   yes:true})
 
-# 2) 改草稿(document 包裹 + 顶层 draft_id,整份替换;forum_bindings 原样保留)
+# 2) 改草稿(整份替换;forum_bindings 原样保留):同样真实写入,拿到新的 preview_url
 call_tool(name:"community-management update-community-topic-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{draft_id:"<draftId>", document:{

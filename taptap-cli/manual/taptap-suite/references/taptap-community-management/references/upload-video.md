@@ -28,7 +28,7 @@ call_tool(name:"community-management +upload-video", args:{
 | --- | --- | --- |
 | `community-management +upload-video` | 社区帖子素材 | 发帖时引用(`pin_video_id` / `cover_video_id` / 正文视频节点) |
 | `asset-library +upload-video` | 素材库 | 素材库视频素材,用于资料与检索 |
-| `upload-video`(顶层) | App 资料 | 直接写回资料字段 |
+| `upload-video`(顶层) | App 资料 | 只返回 `videoId`;对应资料字段仍要由 `app-edit` 用 `save-changes` 回填并读回 |
 
 **三条链路互不通用,视频 ID 不可互换。** 社区发帖缺视频时不要拿素材库的 `videoId` 顶替,也不要为了跑通改用素材库上传。
 

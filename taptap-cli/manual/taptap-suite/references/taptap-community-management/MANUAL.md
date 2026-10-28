@@ -63,7 +63,7 @@ call_tool(name:"community-management get-community-moment", args:{
 - `data` 只写 reference 列出的字段;`developer_id` / `app_id` 用 scope 参数,不要重复写进 `data`。
 - `order` 与 `moment_intent` 是枚举:非法值会被直接拒绝,不会静默降级。
 - 写能力:`+upload-image`、`+upload-video`、发帖与回帖都需要论坛版主/主管理员权限;缺权限按共享错误约定解释,不要改用素材库上传或其它接口绕过。
-- 每个写调用先 `dry_run: true` 预览,用户确认后用完全相同参数加 `yes: true` 执行;既没有 `dry_run` 也没有 `yes` 的写调用会被插件拒绝(CONFIRM_REQUIRED),只读会话里一律拒绝。
+- 写门禁:每个写调用先 `dry_run: true` 预览,用户确认后用完全相同参数加 `yes: true`;例外是发帖草稿的建/改——草稿本身就是给用户看的预览载体,`dry_run` 不建草稿、拿不到 `preview_url`,所以直接用 `yes: true` 写入,再把 `preview_url` 交给用户,发布仍要等用户看过预览并确认。既没有 `dry_run` 也没有 `yes` 的写调用会被插件拒绝(CONFIRM_REQUIRED),只读会话里一律拒绝。
 - 泛问"社区"时先确认三件事:只看某类帖(求助 / 反馈)、要不要某个子版块、要列表还是要正文和回复。
 - 写只覆盖帖子素材、草稿、发布与回复;置顶、加精、沉底、删除、内容处置不在本域,不要用其它业务域的写接口代表用户处置社区内容。
 

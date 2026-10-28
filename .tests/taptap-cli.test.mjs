@@ -950,6 +950,15 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   assert.match(uploadImage, /`width` \/ `height` 必须回传/);
   assert.match(uploadVideo, /`normal` \/ `transcoding` \/ `regulating` 都算正常/);
   assert.match(uploadVideo, /complete-community-moment-video-upload/);
+  // The top-level shortcut only returns a handle; the listing field write is a
+  // separate app-edit step.
+  assert.doesNotMatch(uploadVideo, /直接写回资料字段/);
+  assert.match(uploadVideo, /仍要由 `app-edit` 用 `save-changes` 回填并读回/);
+  // "Preview" means a real draft plus preview_url, not a dry run: drying the
+  // create would leave the user with nothing to look at.
+  assert.match(post, /`dry_run:true` 只打印请求、不建草稿/);
+  assert.match(post, /# 1\) 建草稿[^\n]*真实创建才会返回 preview_url/);
+  assert.match(community, /例外是发帖草稿的建\/改/);
 
   assert.match(shared, /发帖用的 `videoId`/);
   assert.doesNotMatch(shared, /发帖用的 `video_id`/, 'the upload response field is camelCase videoId');
