@@ -134,21 +134,37 @@ test("follow-up keeps draft and file, duplicate creation rejected", async () => 
   assert.equal(r.sent.at(-1).ok, false);
   assert.equal(r.calls.filter((x) => x.method === "prepare").length, 1);
 });
-// Unit regression: the old mobile click opened a two-origin, write-capable
-// localhost editor through a read-only snapshot transport. Do not repeat it.
-test("mobile legacy card directs to the standard file entry without opening the local editor", async () => {
-  const r = runtime();
-  await r.tool("opendesign_new", { html: "<h1>Draft</h1>" });
-  for (const actionId of ["open", "canvas"]) {
-    await r.run({
-      type: "event", name: "card-action", callId: "call-one", spawnCallId: "clicked",
-      actionId, sessionId: sid, mobilePageId: "phone-source",
-    });
-    assert.equal(r.calls.filter(x => x.preview).length, 0);
-    assert.match(r.sent.at(-1).html, /Open the HTML file in the reply/);
+// Unit regression: an upgraded plugin can receive cards persisted by 0.4.26,
+// whose original replies contain no file link. Start from only old Host records;
+// a mobile click must explain how to obtain the link in the original task.
+test("pre-upgrade mobile cards explain recovery and reopen the same draft with a standard link", async () => {
+  for (const locale of ["en", "zh-CN"]) {
+    const legacyDraft = {id:"legacy-draft",sessionId:sid,root:"/project/new",file:"design.html",title:"Existing design"};
+    const disk = new Map([
+      ["sessions/" + sid + ".json", JSON.stringify(legacyDraft)],
+      ["cards/legacy-call.json", JSON.stringify({sessionId:sid,draftId:legacyDraft.id})],
+    ]);
+    const r = runtime(disk, undefined, undefined, locale);
+    for (const actionId of ["open", "canvas"]) {
+      await r.run({
+        type: "event", name: "card-action", callId: "legacy-call", spawnCallId: "clicked",
+        actionId, sessionId: sid, mobilePageId: "phone-source",
+      });
+      assert.equal(r.calls.filter(x => x.preview || x.agent || x.method === "draft-write").length, 0);
+      const recovery = locale === "zh-CN" ? /原任务.*重新打开稿件.*HTML 文件链接/ : /original task.*reopen.*HTML file link/;
+      assert.match(r.sent.findLast(x => x.callId === "legacy-call").html, recovery);
+      assert.match(r.sent.at(-1).html, recovery);
+    }
+    // Following the recovery instruction must only publish a link to this draft.
+    await r.tool("opendesign_open", {}, "reopened");
+    assert.equal(r.sent.at(-1).ok, true);
+    assert.equal(r.sent.at(-1).result.draftId, legacyDraft.id);
+    assert.equal(r.sent.at(-1).result.previewPath, "/project/new/design.html");
+    assert.match(r.sent.at(-1).result.previewMarkdown, /design\.html/);
+    assert.equal(r.calls.filter(x => x.method === "prepare" || x.method === "draft-write").length, 0);
+    await r.run({type:"event",name:"card-action",callId:"legacy-call",actionId:"open",sessionId:sid});
+    assert.equal(r.calls.filter(x => x.preview).length, 1);
   }
-  await r.run({type:"event",name:"card-action",callId:"call-one",actionId:"open",sessionId:sid});
-  assert.equal(r.calls.filter(x => x.preview).length, 1);
 });
 // Unit: create/read/update/reopen must all expose the same existing file, so
 // remote users do not depend on a card's execution-computer-local editor URL.

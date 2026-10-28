@@ -117,7 +117,7 @@
     // The standard file link in the tool result is the cross-device entry.
     // A mobile page cannot run this two-origin editor or its POST/save APIs.
     const r = msg.mobilePageId
-      ? { ok: false, message: text("请打开回复中的 HTML 文件查看稿件；本机编辑器在运行插件的电脑上使用。", "Open the HTML file in the reply to view the design. The local editor runs on the computer hosting the plugin.") }
+      ? { ok: false, message: text("请打开回复中的 HTML 文件查看稿件。如果旧回复没有链接，请在原任务说“重新打开稿件，给我 HTML 文件链接”。本机编辑器在运行插件的电脑上使用。", "Open the HTML file in the reply to view the design. If an older reply has no link, ask in the original task: “Please reopen this draft and give me its HTML file link.” The local editor runs on the computer hosting the plugin.") }
       : await cindy.preview({ url, sessionId: d.sessionId });
     await cindy.send({
       type: "card-update",
