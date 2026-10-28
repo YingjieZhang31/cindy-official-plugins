@@ -26,8 +26,9 @@ community-management 负责读社区内容、上传帖子素材、发帖与回�
 | 统计回复数,或解释置顶回复、`stat` / `total` 口径 | [read replies](taptap-suite/references/taptap-community-management/references/read-replies.md) | — |
 | 有本地图片,要传成帖子配图 | [upload image](taptap-suite/references/taptap-community-management/references/upload-image.md) | `call_tool(name:"community-management +upload-image", args:{_positional:["./cover.png"], developer_id:"<developerId>", app_id:"<appId>", dry_run:true})` |
 | 有本地视频,要拿发帖用的 `videoId` | [upload video](taptap-suite/references/taptap-community-management/references/upload-video.md) | `call_tool(name:"community-management +upload-video", args:{_positional:["./clip.mp4"], developer_id:"<developerId>", app_id:"<appId>", dry_run:true})` |
-| 要发帖、改草稿或发布草稿 | [publish post](taptap-suite/references/taptap-community-management/references/publish-post.md) | `call_tool(name:"community-management create-community-topic-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
-| 要回帖(一级回复 / 子回复) | [reply moment](taptap-suite/references/taptap-community-management/references/reply-moment.md) | `call_tool(name:"community-management create-community-moment-reply", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
+| 要发帖、改草稿或发布草稿 | [publish post](taptap-suite/references/taptap-community-management/references/publish-post.md) | `call_tool(name:"community-management create-community-topic-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, yes:true})`(草稿真实写入才返回 `preview_url`;发布等用户看过预览再确认) |
+| 回帖(一级回复) | [reply moment](taptap-suite/references/taptap-community-management/references/reply-moment.md) | `call_tool(name:"community-management create-community-moment-reply", args:{developer_id:"<developerId>", app_id:"<appId>", data:{moment_id:"<momentId>", contents:"…"}, dry_run:true})` |
+| 回帖(某条回复下的子回复) | [reply moment](taptap-suite/references/taptap-community-management/references/reply-moment.md) | `call_tool(name:"community-management create-community-moment-reply-child", args:{developer_id:"<developerId>", app_id:"<appId>", data:{moment_id:"<momentId>", parent_reply_id:"<commentId>", contents:"…"}, dry_run:true})` |
 | 要玩家评价或经营数据(评分、下载、曝光等) | 转 `taptap-player-feedback` / `taptap-dashboard-stats` 手册 | — |
 | 要置顶、加精、沉底、删除或处理内容 | 本域不承接;说明边界,不要承诺已处置 | — |
 

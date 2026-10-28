@@ -960,6 +960,27 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   assert.match(post, /# 1\) 建草稿[^\n]*真实创建才会返回 preview_url/);
   assert.match(community, /例外是发帖草稿的建\/改/);
 
+  // The quick table must not hand the first-level reply call to a child reply:
+  // that writes to the post root, and the domain has no delete.
+  assert.match(community, /\| 回帖\(一级回复\)/);
+  assert.match(community, /\| 回帖\(某条回复下的子回复\)/);
+  assert.doesNotMatch(community, /要回帖\(一级回复 \/ 子回复\)/);
+  // Draft creation is a real write: a dry run produces no preview_url.
+  assert.match(community, /create-community-topic-draft[\s\S]{0,160}yes:true/);
+  assert.doesNotMatch(community, /create-community-topic-draft[\s\S]{0,160}dry_run:true/);
+  // The manifest and its four locales carry the same draft exception.
+  const carrierDocs = [
+    JSON.parse(fs.readFileSync(path.join(root, 'taptap-cli', 'ghost.json'), 'utf8')),
+    ...['zh-CN', 'en', 'ja', 'ko'].map((locale) => JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'))),
+  ];
+  for (const carrier of carrierDocs) {
+    const callTool = Array.isArray(carrier.tools)
+      ? carrier.tools.find((tool) => tool.name === 'call_tool')
+      : carrier.tools.call_tool;
+    assert.match(callTool.description, /preview_url/, 'every carrier must state the draft exception');
+  }
+
   assert.match(shared, /发帖用的 `videoId`/);
   assert.doesNotMatch(shared, /发帖用的 `video_id`/, 'the upload response field is camelCase videoId');
   assert.match(community, /要拿发帖用的 `videoId`/);
