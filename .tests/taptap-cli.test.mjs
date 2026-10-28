@@ -48,6 +48,7 @@ const FIXTURE_TREE = {
     ['fail-op', 'Always fails with a structured error'],
     ['partial-op', 'Fails after uploading some items'],
     ['unavail-op', 'Fails with an upstream 5xx after dispatch'],
+    ['crash-op', 'Exits non-zero with plain text and no envelope'],
     ['+list', 'List games visible under a developer account'],
     ['create-app', 'Create a game draft'],
     ['submit-app-review', 'Submit app edit for review'],
@@ -113,6 +114,7 @@ const FIXTURE_RISK = {
   'app fail-op': 'write',
   'app partial-op': 'write',
   'app unavail-op': 'write',
+  'app crash-op': 'write',
 };
 
 const FIXTURE_SCHEMA = [
@@ -174,6 +176,10 @@ if (args[1] === 'partial-op') {
 if (args[1] === 'unavail-op') {
   process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'server_error', message: 'upstream 503' } }));
   process.exit(3);
+}
+if (args[1] === 'crash-op') {
+  process.stderr.write('panic: connection reset');
+  process.exit(4);
 }
 // Bare \`version\` is the settings status probe. With flags it is just an
 // arbitrary command to the control-flag test, which expects the echo below.
@@ -467,6 +473,19 @@ test('an upstream 5xx on a write stays unknown, not "not executed"', async () =>
   assert.equal(reply.result.errorCode, 'BUSINESS_ERROR');
   assert.equal(reply.result.execution_state, 'unknown');
   assert.match(reply.result.message, /核对实际状态/);
+});
+
+test('a bare non-zero exit keeps CLI_FAILED and the raw output', async () => {
+  // No envelope means no error.type/subtype to read. The text probe must not
+  // dereference the missing error object, or a crash is reported as INTERNAL and
+  // the agent loses the exit code and the original stderr.
+  const [reply] = await callWorker([
+    callTool('app crash-op', { cli_path: fakeCli, args: { yes: true } }),
+  ]);
+  assert.equal(reply.result.ok, false);
+  assert.equal(reply.result.errorCode, 'CLI_FAILED');
+  assert.equal(reply.result.execution_state, 'unknown');
+  assert.match(reply.result.data.raw, /connection reset/);
 });
 
 test('a write that failed with partial results is never "not executed"', async () => {

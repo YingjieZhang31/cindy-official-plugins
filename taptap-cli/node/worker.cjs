@@ -1392,8 +1392,11 @@ async function callTool(params) {
     // A bare non-zero exit with no envelope (crash, signal, killed helper) is
     // likewise indeterminate for a write.
     const err = env && env.ok === false && env.error ? env.error : null;
-    let ambiguous = errorMayHaveLanded(err)
-      || (/ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || '')));
+    // Without an envelope there is no subtype to read; the text check must stay
+    // behind the null guard or a bare crash turns into an internal error.
+    const ambiguousByText = Boolean(err)
+      && /ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || ''));
+    let ambiguous = errorMayHaveLanded(err) || ambiguousByText;
     // A batch can fail after some items already succeeded: the manual tells the
     // agent to keep the handles that came back and retry only the items without
     // one. Calling that "not executed" would invite a full re-run and duplicate
