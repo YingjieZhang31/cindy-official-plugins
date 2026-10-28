@@ -6,7 +6,7 @@ community-management 负责读社区内容、上传帖子素材、发帖与回�
 
 **CRITICAL — `moment_id` / `parent_reply_id` / `draft_id` 是位数很长的十进制整数 ID,必须当作字符串原样回传:不要转成数字(会丢精度),也不要补零或重新拼接。**
 
-**CRITICAL — `list-community-moment-replies` 只返回直接回复帖子的那一层;某条回复下的回复要用 `list-community-moment-child-replies` 传 `parent_reply_id`,父回复必须是该帖的一级回复。**
+**CRITICAL — `list-community-moment-replies` 只返回直接回复帖子的那一层;某条回复下的回复要用 `list-community-moment-child-replies` 传 `parent_reply_id`,读接口里的父回复可以是任意层级。写入子回复时 `parent_reply_id` 必须是该帖的一级回复(见 reply moment 手册);要回复「回复下的回复」时用 `reply_to_reply_id` 指向更深的那条。**
 
 **CRITICAL — 发帖发布是跨轮步骤:同一轮内禁止 create-draft → publish-draft 连跑。** publish 的前提是本会话已经交付过 `preview_url`,且用户看过预览后明确回复可以发。只说"发个帖:<内容>"只表达发帖意图,不构成发布确认;`yes: true` 只解除写门禁,不等于用户已确认发布。用户事先明确说"不用预览,直接发"时,才可在同一轮内发布,并在回执里说明已按此豁免执行。
 
@@ -25,7 +25,7 @@ community-management 负责读社区内容、上传帖子素材、发帖与回�
 | 看某条回复下的子回复 | [read replies](taptap-suite/references/taptap-community-management/references/read-replies.md) | `call_tool(name:"community-management list-community-moment-child-replies", args:{developer_id:"<developerId>", app_id:"<appId>", data:{moment_id:"<momentId>", parent_reply_id:"<replyId>", page:1, page_size:20}})` |
 | 统计回复数,或解释置顶回复、`stat` / `total` 口径 | [read replies](taptap-suite/references/taptap-community-management/references/read-replies.md) | — |
 | 有本地图片,要传成帖子配图 | [upload image](taptap-suite/references/taptap-community-management/references/upload-image.md) | `call_tool(name:"community-management +upload-image", args:{_positional:["./cover.png"], developer_id:"<developerId>", app_id:"<appId>", dry_run:true})` |
-| 有本地视频,要拿发帖用的 `video_id` | [upload video](taptap-suite/references/taptap-community-management/references/upload-video.md) | `call_tool(name:"community-management +upload-video", args:{_positional:["./clip.mp4"], developer_id:"<developerId>", app_id:"<appId>", dry_run:true})` |
+| 有本地视频,要拿发帖用的 `videoId` | [upload video](taptap-suite/references/taptap-community-management/references/upload-video.md) | `call_tool(name:"community-management +upload-video", args:{_positional:["./clip.mp4"], developer_id:"<developerId>", app_id:"<appId>", dry_run:true})` |
 | 要发帖、改草稿或发布草稿 | [publish post](taptap-suite/references/taptap-community-management/references/publish-post.md) | `call_tool(name:"community-management create-community-topic-draft", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
 | 要回帖(一级回复 / 子回复) | [reply moment](taptap-suite/references/taptap-community-management/references/reply-moment.md) | `call_tool(name:"community-management create-community-moment-reply", args:{developer_id:"<developerId>", app_id:"<appId>", data:{...}, dry_run:true})` |
 | 要玩家评价或经营数据(评分、下载、曝光等) | 转 `taptap-player-feedback` / `taptap-dashboard-stats` 手册 | — |

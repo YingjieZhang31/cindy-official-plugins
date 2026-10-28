@@ -936,10 +936,43 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   assert.match(post, /`contents` 是字符串不是数组/);
   assert.match(reply, /call_tool\(name:"community-management create-community-moment-reply-child"/);
   assert.match(reply, /`parent_reply_id` 必须是一级回复/);
+  // The read path accepts any reply level, the write path only a first-level
+  // reply. Both manuals have to say which is which, or the agent follows the
+  // wrong one.
+  const readReplies = read('taptap-suite/references/taptap-community-management/references/read-replies.md');
+  assert.match(community, /读接口里的父回复可以是任意层级/);
+  assert.match(community, /写入子回复时 `parent_reply_id` 必须是该帖的一级回复/);
+  assert.match(readReplies, /父回复可以是任意层级/);
+  assert.match(readReplies, /只有一级回复的 `comment_id` 能当 `parent_reply_id`/);
   assert.match(uploadImage, /没有 `assetId`/, 'community images are not asset-library handles');
   assert.match(uploadImage, /`width` \/ `height` 必须回传/);
   assert.match(uploadVideo, /`normal` \/ `transcoding` \/ `regulating` 都算正常/);
   assert.match(uploadVideo, /complete-community-moment-video-upload/);
+
+  assert.match(shared, /发帖用的 `videoId`/);
+  assert.doesNotMatch(shared, /发帖用的 `video_id`/, 'the upload response field is camelCase videoId');
+  assert.match(community, /要拿发帖用的 `videoId`/);
+  // The post detail payload keeps the server's snake_case field; only the
+  // upload shortcut response is camelCase. Both spellings are correct in their
+  // own place, so the distinction must stay documented.
+  assert.match(read('taptap-suite/references/taptap-community-management/references/read-moments.md'), /只含 `video_id`/);
+
+  // An unknown write outcome must be verified before any retry advice: the
+  // manual may not turn "timed out" into "not executed".
+  assert.match(reply, /结果未知不能当未执行/);
+  assert.match(reply, /先核对远端实际状态/);
+  assert.doesNotMatch(
+    reply,
+    /结果未知[^。\n]*用同一条命令重试/,
+    'an unknown reply outcome must not be told to retry directly',
+  );
+  assert.match(post, /超时或结果未知时,先用 `get-community-topic-draft` 核对/);
+  // `update` / `publish` replace the whole document, so an example that shows
+  // `forum_bindings: []` would silently detach the post from its forums.
+  assert.doesNotMatch(post, /forum_bindings["']?\s*:\s*\[\]/, 'the example must not clear forum bindings');
+  assert.match(post, /清空 `forum_bindings` 等于把帖子从所有论坛撤掉/);
+  assert.match(uploadImage, /结果不确定:先核对/);
+  assert.match(uploadVideo, /结果属于\*\*未知\*\*/);
 
   for (const [label, text] of [
     ['publish post', post],

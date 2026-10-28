@@ -119,13 +119,20 @@ call_tool(name:"community-management get-community-forum-publish-options", args:
 ```jsonc
 {
   "draft_id": "<draftId>",
-  "document": { "title": "…", "contents": "[…]", "pin_video_id": "…", "forum_bindings": [] }
+  "document": {
+    "title": "…",
+    "contents": "[…]",
+    "pin_video_id": "…",
+    "forum_bindings": [{ "app_id": "<appId>", "group_label_id": "0", "identity": "official" }]  // 完整绑定,不能传 []
+  }
 }
 ```
 
 **CRITICAL — `draft_id` 不要写进 `document`。** `document` 按字段严格校验,多一个 `draft_id` 会被服务端以 400 拒绝,看起来很像「不支持更新」,实际只是层级放错。
 
 **CRITICAL — `update` / `publish` 是整份替换,不是增量。** 漏传的字段会被还原成缺省值(`title` 空串、`forum_bindings` 空数组等)。改一版就重发一份完整文档;可以先 `get` 一次,在返回值上改,再整体回传。
+
+**CRITICAL — 清空 `forum_bindings` 等于把帖子从所有论坛撤掉。** `update` 和 `publish` 必须原样带上完整绑定(论坛、子版块、身份),不要为了省事传空数组;多个论坛时逐个保留,不要只留第一个。
 
 ## 文档字段
 
@@ -186,11 +193,13 @@ call_tool(name:"community-management create-community-topic-draft", args:{
                         honor:{mode:"inherit"}}]},
   yes:true})
 
-# 2) 改草稿(document 包裹 + 顶层 draft_id,整份替换)
+# 2) 改草稿(document 包裹 + 顶层 draft_id,整份替换;forum_bindings 原样保留)
 call_tool(name:"community-management update-community-topic-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{draft_id:"<draftId>", document:{title:"…", contents:"[…]",
-        pin_video_id:"<videoId>", forum_bindings:[]}},
+  data:{draft_id:"<draftId>", document:{
+    title:"…", contents:"[…]", pin_video_id:"<videoId>",
+    forum_bindings:[{app_id:"<appId>", group_label_id:"0", identity:"official",
+                    honor:{mode:"inherit"}}]}},
   yes:true})
 
 # 3) 读草稿(draft_id 直接写在 data 里)
@@ -198,11 +207,13 @@ call_tool(name:"community-management get-community-topic-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{draft_id:"<draftId>"}})
 
-# 4) 发布(不可逆;用户看过 preview 并明确同意后)
+# 4) 发布(不可逆;用户看过 preview 并明确同意后;绑定同样不能省)
 call_tool(name:"community-management publish-community-topic-draft", args:{
   developer_id:"<developerId>", app_id:"<appId>",
-  data:{draft_id:"<draftId>", document:{title:"…", contents:"[…]",
-        pin_video_id:"…", forum_bindings:[]}},
+  data:{draft_id:"<draftId>", document:{
+    title:"…", contents:"[…]", pin_video_id:"<videoId>",
+    forum_bindings:[{app_id:"<appId>", group_label_id:"0", identity:"official",
+                    honor:{mode:"inherit"}}]}},
   yes:true})
 ```
 
@@ -222,7 +233,7 @@ call_tool(name:"community-management publish-community-topic-draft", args:{
 | `get-community-topic-draft` | 已发布视图:`moment_id` + 帖子页 URL |
 | `get-community-moment` | 正文、图片、视频明细;审核中会 422,过审后再读 |
 
-**CRITICAL — 发布成功不等于立即可查。** 刚发布时列表里可能还没有这条帖子,详情也会因为审核中返回 422;两者都不能反推「发布失败」。判断发布结果只看 `publish` 返回的 `moment_id`,回读只用于补充确认,失败重试前先确认是不是查得太早。
+**CRITICAL — 发布成功不等于立即可查,也不等于失败。** 刚发布时列表里可能还没有这条帖子,详情也会因为审核中返回 422;两者都不能反推「发布失败」。判断发布结果只看 `publish` 返回的 `moment_id`。超时或结果未知时,先用 `get-community-topic-draft` 核对草稿是否已变成已发布视图(返回 `moment_id`);确认没有 `moment_id` 后,才可以对同一个 `draft_id` 重试发布,不要把「列表里查不到」当成没发出去。
 
 ## 失败怎么解释
 
@@ -234,6 +245,7 @@ call_tool(name:"community-management publish-community-topic-draft", args:{
 | 403 `permission_denied` | 不是该 App 的论坛管理员,或没有官方发布资格 | 换账号 / 改 `identity: "personal"` / 补权限 |
 | 404 `not_found` | `draft_id` 不存在,或草稿已发布被删除 | 已发布就不要再改;需要新内容就重新建草稿 |
 | 422 帖子审核中 | 帖子正在审核,详情不可读 | 等待过审,不要重发 |
+| 超时 / 结果未知(`unknown`) | 发布请求可能已经生效 | 先 `get-community-topic-draft` 核对 `moment_id`:已发布就用首次结果;确认没有 `moment_id` 后,才对同一 `draft_id` 重试 |
 | 400 `invalid_argument` | 参数不合法(标题超长、`contents` 超 50000 字、组图超 18 张、`group_label_id` 格式错等) | 按提示裁剪后重发整份文档 |
 
 **CRITICAL — 发布不可逆。** `publish-community-topic-draft` 是 high-risk-write:没有撤回接口,删除与编辑要走社区侧的人工处置。发布前把完整文档和 `publish_url` 预期给用户确认,不要替用户「先发出去再说」。

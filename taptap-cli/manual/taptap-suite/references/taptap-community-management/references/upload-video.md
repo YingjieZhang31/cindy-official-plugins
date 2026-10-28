@@ -74,7 +74,7 @@ call_tool(name:"community-management +upload-video", args:{
 ## 限制与重试
 
 - 本地规则:扩展名 `.mp4` / `.mov`,最大 5 GB,路径必须在当前工作目录内。不满足时在本地就失败,不会发出请求。
-- 同一文件、同一 App、同一账号重复执行会复用同一次上传意图;显式传 `idempotency_key` 可以固定重试语义。换文件或换 App 才是一次新的上传。
+- 同一文件、同一 App、同一账号重复执行会复用同一次上传意图;显式传 `idempotency_key` 可以固定这次意图,续跑时沿用同一个 key。
 - 上传成功但登记失败时,命令会给出**已存储的对象句柄、文件名和原幂等键**。只用这三样调用 `complete-community-moment-video-upload` 补登记,不要重跑整条命令——重跑会重新传输整个文件:
 
   ```text
@@ -84,7 +84,7 @@ call_tool(name:"community-management +upload-video", args:{
     data:{object:"<对象句柄>", file_name:"<文件名>"}, yes:true})
   ```
 
-  只有拿不到句柄时(例如命令被中断、没有错误输出)才用同一个文件重跑整条命令;同一个幂等键不会产生第二份视频。
+  拿不到句柄时(命令被中断、没有错误输出)结果属于**未知**:社区侧没有状态查询接口,不能假设没传上去。先向用户说明这次上传结果不确定;确需续跑时,只能用同一个文件、同一个 `idempotency_key` 重放同一次意图(不会产生第二份视频),不要换文件、换 key 或另起一次上传。
 
 ## 失败怎么解释
 
@@ -97,4 +97,4 @@ call_tool(name:"community-management +upload-video", args:{
 | 400 `invalid_argument` | 扩展名或文件内容不合法 | 按提示修正后重试 |
 | `transcode_failed` / `regulate_rejected` | 服务端处理失败 | 换文件重传,不要重复提交同一文件 |
 | 登记失败,提示对象已存储 | 文件已上传,登记没完成 | 用错误输出里的对象句柄与原幂等键只重试登记,不要重跑整条命令 |
-| 502/503 | 上传或社区上游暂时不可用 | 稍后重试,重试时复用同一个 `idempotency_key` |
+| 502/503 | 上传或社区上游暂时不可用;请求可能已经到达服务端 | 结果不确定:先核对是否已拿到 `videoId` 或对象句柄,确认这次没有产出后再用同一个 `idempotency_key` 续跑,不要另起一次上传 |

@@ -54,7 +54,7 @@ call_tool(name:"community-management +upload-image", args:{
 
 - 单张图片上限 **10 MB**;超过由服务端直接返回 413,CLI 会在上传前先按 10 MB 拒绝。
 - 支持的扩展名与文件头必须匹配(假扩展名会被拒)。
-- 同内容 + 同 App + 同目标会得到相同幂等键;换目录或改名重传不会产生新的写入意图。需要重试时复用同一个 `idempotency_key`。
+- 同内容 + 同 App + 同目标会得到相同幂等键;换目录或改名重传不会产生新的写入意图。同一意图续跑时复用同一个 `idempotency_key`;结果未知时先核对是否已产出 `url`,不要另起一次上传。
 - 图片会经过 CDN 重新编码(尺寸不变,字节内容可能变化),因此本地算的哈希不能用于校验远端字节。
 
 ## 失败怎么解释
@@ -66,5 +66,5 @@ call_tool(name:"community-management +upload-image", args:{
 | 404 `not_found` | 该 App 没有论坛 | 先开通论坛 |
 | 400 `invalid_argument` | 扩展名/文件头/参数不合法 | 按提示修文件或参数 |
 | 413 | 超过平台 multipart 上限 | 压缩或裁剪图片 |
-| 503 `temporarily_unavailable` | 图片服务或社区上游不可用 | 可重试;不要因为失败就重复上传多份 |
+| 503 `temporarily_unavailable` | 图片服务或社区上游不可用,这次请求可能已经到达服务端 | 结果不确定:先核对这次上传是否已产出 `url`(本次响应或用户侧记录),确认没生效再用同一个 `idempotency_key` 续跑,不要重复上传多份 |
 | `failed_precondition`,提示命令不可执行 | 当前 CLI 版本或环境还不支持社区图片上传 | 升级 CLI 或等元数据更新;不要改用素材库 `upload` 凑合 |

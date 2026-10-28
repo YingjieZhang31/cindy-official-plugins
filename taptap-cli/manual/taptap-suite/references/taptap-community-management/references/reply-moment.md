@@ -79,7 +79,11 @@ call_tool(name:"community-management create-community-moment-reply-child", args:
 
 ## 幂等与重试
 
-同一条命令重试不会重复回复:CLI 会复用同一次写入意图。结果未知(超时、`ambiguous_outcome`)时用同一条命令重试,不要改文案重发——否则会多出一条回复。
+同一条命令按同一意图重试不会重复回复(CLI 会复用同一次写入意图),但**结果未知不能当未执行**:
+
+- 超时、`ambiguous_outcome` 或连接中断后,先核对远端实际状态:用 `list-community-moment-replies` / `list-community-moment-child-replies` 看这条回复是否已经出现。帖子审核中查不到**不能**据此断定没发出去。
+- 只有确认这次写入没有生效,才用相同内容、同一意图重试;不要改文案重发,否则可能多出一条回复。
+- 核对不了(读接口也不可用)时,向用户说明这次回复结果不确定、可能已经发出;先不要重发,等能读到列表或详情后再判断。
 
 ## 失败怎么解释
 
