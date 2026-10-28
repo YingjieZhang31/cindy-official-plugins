@@ -1091,6 +1091,28 @@ function buildArgv(tokens, args) {
   return { argv };
 }
 
+// A structured error does not prove a write never reached the server. Upstream
+// 5xx responses, network-level failures after dispatch and the CLI's explicit
+// ambiguous subtypes all leave the outcome open; only a refusal the CLI could
+// determine stays not_executed.
+const AMBIGUOUS_ERROR_SUBTYPES = new Set([
+  'ambiguous_outcome',
+  'task_finalization_unknown',
+  'result_unknown',
+  'temporarily_unavailable',
+  'server_error',
+  'timeout',
+  'transport',
+  'sdk_error',
+  'invalid_response',
+  'unknown',
+]);
+function errorMayHaveLanded(err) {
+  if (!err) return false;
+  if (String(err.type || '') === 'network') return true;
+  return AMBIGUOUS_ERROR_SUBTYPES.has(String(err.subtype || ''));
+}
+
 async function callTool(params) {
   const runOpts = runOptions(params);
   const name = params && typeof params.name === 'string' ? params.name.trim() : '';
@@ -1370,7 +1392,8 @@ async function callTool(params) {
     // A bare non-zero exit with no envelope (crash, signal, killed helper) is
     // likewise indeterminate for a write.
     const err = env && env.ok === false && env.error ? env.error : null;
-    let ambiguous = Boolean(err) && /ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || ''));
+    let ambiguous = errorMayHaveLanded(err)
+      || (/ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || '')));
     // A batch can fail after some items already succeeded: the manual tells the
     // agent to keep the handles that came back and retry only the items without
     // one. Calling that "not executed" would invite a full re-run and duplicate

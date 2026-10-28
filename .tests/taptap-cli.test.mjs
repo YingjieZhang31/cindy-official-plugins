@@ -47,6 +47,7 @@ const FIXTURE_TREE = {
     ['+bind-spark-version', 'Bind a Spark version'],
     ['fail-op', 'Always fails with a structured error'],
     ['partial-op', 'Fails after uploading some items'],
+    ['unavail-op', 'Fails with an upstream 5xx after dispatch'],
     ['+list', 'List games visible under a developer account'],
     ['create-app', 'Create a game draft'],
     ['submit-app-review', 'Submit app edit for review'],
@@ -111,6 +112,7 @@ const FIXTURE_RISK = {
   'auth logout': 'write',
   'app fail-op': 'write',
   'app partial-op': 'write',
+  'app unavail-op': 'write',
 };
 
 const FIXTURE_SCHEMA = [
@@ -168,6 +170,10 @@ if (args[1] === 'fail-op') {
 if (args[1] === 'partial-op') {
   process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'partial_failure', message: '2 of 3 uploaded' }, data: { uploaded: [{ handle: 'h1' }, { handle: 'h2' }] } }));
   process.exit(2);
+}
+if (args[1] === 'unavail-op') {
+  process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'server_error', message: 'upstream 503' } }));
+  process.exit(3);
 }
 // Bare \`version\` is the settings status probe. With flags it is just an
 // arbitrary command to the control-flag test, which expects the echo below.
@@ -448,6 +454,19 @@ test('a CLI failure envelope is read from stderr and reported as a business erro
   assert.equal(reply.result.execution_state, 'not_executed');
   assert.equal(reply.result.data.error.type, 'validation');
   assert.match(reply.result.message, /fix it/);
+});
+
+test('an upstream 5xx on a write stays unknown, not "not executed"', async () => {
+  // A 5xx (or any network-level failure) can arrive after the server already
+  // applied the write. The CLI only knows it failed, not whether it landed, so
+  // the worker must not turn it into a retryable "not executed" signal.
+  const [reply] = await callWorker([
+    callTool('app unavail-op', { cli_path: fakeCli, args: { yes: true } }),
+  ]);
+  assert.equal(reply.result.ok, false);
+  assert.equal(reply.result.errorCode, 'BUSINESS_ERROR');
+  assert.equal(reply.result.execution_state, 'unknown');
+  assert.match(reply.result.message, /核对实际状态/);
 });
 
 test('a write that failed with partial results is never "not executed"', async () => {
@@ -1458,9 +1477,11 @@ test('a write that fails ambiguously is reported as unknown, never as failed', (
   assert.match(workerSource, /不要直接重跑/, 'an unknown outcome must tell the agent to verify before retrying');
 
   // A structured CLI error is usually the CLI deciding the outcome (not
-  // executed), but an ambiguous subtype (e.g. ambiguous_outcome) means the CLI
-  // does not know whether a write was applied, so it must stay unknown.
-  assert.match(workerSource, /let ambiguous = Boolean\(err\)/);
+  // executed), but ambiguous subtypes — ambiguous_outcome, a 5xx server_error,
+  // a network-level failure — mean the CLI does not know whether a write was
+  // applied, so those must stay unknown.
+  assert.match(workerSource, /let ambiguous = errorMayHaveLanded\(err\)/);
+  assert.match(workerSource, /AMBIGUOUS_ERROR_SUBTYPES\.has/);
   assert.match(workerSource, /\(err && !ambiguous\) \? 'not_executed' : unknownForWrite/);
 
   // The worker computing the state is not enough: the brain must carry it into
