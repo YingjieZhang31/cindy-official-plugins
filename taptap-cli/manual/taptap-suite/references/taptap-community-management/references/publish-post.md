@@ -248,4 +248,4 @@ call_tool(name:"community-management publish-community-topic-draft", args:{
 | 超时 / 结果未知(`unknown`) | 发布请求可能已经生效 | 先 `get-community-topic-draft` 核对 `moment_id`:已发布就用首次结果;确认没有 `moment_id` 后,才对同一 `draft_id` 重试 |
 | 400 `invalid_argument` | 参数不合法(标题超长、`contents` 超 50000 字、组图超 18 张、`group_label_id` 格式错等) | 按提示裁剪后重发整份文档 |
 
-**CRITICAL — 发布不可逆。** `publish-community-topic-draft` 是 high-risk-write:没有撤回接口,删除与编辑要走社区侧的人工处置。发布前把完整文档和 `publish_url` 预期给用户确认,不要替用户「先发出去再说」。
+**CRITICAL — 发布不可逆。** `publish-community-topic-draft` 是 high-risk-write:没有撤回接口,删除与编辑要走社区侧的人工处置。发布前把完整文档和预期的帖子内容交给用户确认(`preview_url` 是发布前唯一可交付的预览;`publish_url` 只在发布成功后才返回),不要替用户「先发出去再说」。

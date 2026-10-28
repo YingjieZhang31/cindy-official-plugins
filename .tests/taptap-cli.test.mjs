@@ -934,6 +934,8 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   assert.match(post, /call_tool\(name:"community-management publish-community-topic-draft"/);
   assert.match(post, /`draft_id` 不要写进 `document`/, 'the nested-shape trap must stay documented');
   assert.match(post, /`contents` 是字符串不是数组/);
+  assert.match(post, /`preview_url` 是发布前唯一可交付的预览/);
+  assert.doesNotMatch(post, /发布前把完整文档和 `publish_url`/, 'publish_url only exists after a successful publish');
   assert.match(reply, /call_tool\(name:"community-management create-community-moment-reply-child"/);
   assert.match(reply, /`parent_reply_id` 必须是一级回复/);
   // The read path accepts any reply level, the write path only a first-level
@@ -997,7 +999,7 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   // the top-level routing names the posting-media path.
   assert.match(shared, /域内上传例外是 `community-management \+upload-image` 与 `\+upload-video`/);
   assert.match(shared, /社区 `\+upload-image` \/ `\+upload-video` 省略时按内容派生/);
-  assert.match(top, /\| 把本地图片传成帖子配图[^|]*\| `community-management`/);
+  assert.match(top, /\| 把本地图片或视频传成帖子素材[^|]*\| `community-management`/);
   assert.match(handbooks, /发布后的社区发帖/);
 
   // Precheck: `preaudit_status` is the primary signal, and "unavailable" is a

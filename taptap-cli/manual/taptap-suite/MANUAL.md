@@ -77,7 +77,7 @@
 | 查论坛访问量、活跃用户、内容发布/删除/移动、区间回复新增等论坛数据 | `dashboard-stats`(forum stats) | 用 `get-forum-stats`,先确认 `type`、维度和时间范围 |
 | 查玩家评价正文、差评、官方回复 | `player-feedback` | 先确认时间范围和评分口径 |
 | 查论坛帖子、子版块、帖子正文、一级回复和子回复,或发帖/回帖 | `community-management` | 先确认帖子意图、子版块和时间范围;发帖先给预览再发布 |
-| 把本地图片传成帖子配图(发帖用) | `community-management`(配图上传) | 先确认用途是发帖配图,别走素材库 `upload` |
+| 把本地图片或视频传成帖子素材(发帖用) | `community-management`(帖子素材上传) | 图片用 `+upload-image`、视频用 `+upload-video`;回复不支持视频(子回复仅文字);别走素材库 `upload` / `upload-video` |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
 
 ## call_tool 返回解读
