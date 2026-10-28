@@ -973,6 +973,15 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   assert.match(post, /清空 `forum_bindings` 等于把帖子从所有论坛撤掉/);
   assert.match(uploadImage, /结果不确定:先核对/);
   assert.match(uploadVideo, /结果属于\*\*未知\*\*/);
+  assert.match(uploadVideo, /确认没有产出后,才用同一个文件/);
+  // The command-pattern reference is the second entry the agent reads for
+  // uploads; leaving it on "all local media goes to materials" would hand the
+  // agent a URL that a post cannot use.
+  const patterns = read('taptap-suite/references/cli-command-patterns.md');
+  assert.doesNotMatch(patterns, /本地物料统一进入/, 'the blanket materials route must be scoped');
+  assert.match(patterns, /社区帖子的配图\/视频不走这套/);
+  assert.match(patterns, /community-management \+upload-image/);
+  assert.doesNotMatch(patterns, /返回 video_id（后台转码）/, 'the upload response is videoId');
 
   for (const [label, text] of [
     ['publish post', post],
