@@ -44,6 +44,7 @@ function runtime(disk = new Map(), reply = { ok: true, sessionId: sid }, nodeOve
                     cardHtml: "<h1>Actual draft</h1>",
                     html: "<html><body><h1>Actual draft</h1></body></html>",
                     revision: "abc123456",
+                    previewPath: "/project/new/design.html",
                     sketches: [],
                   },
         };
@@ -132,6 +133,40 @@ test("follow-up keeps draft and file, duplicate creation rejected", async () => 
   await r.tool("opendesign_new", { html: "new" }, "duplicate");
   assert.equal(r.sent.at(-1).ok, false);
   assert.equal(r.calls.filter((x) => x.method === "prepare").length, 1);
+});
+// Unit regression: the old mobile click opened a two-origin, write-capable
+// localhost editor through a read-only snapshot transport. Do not repeat it.
+test("mobile legacy card directs to the standard file entry without opening the local editor", async () => {
+  const r = runtime();
+  await r.tool("opendesign_new", { html: "<h1>Draft</h1>" });
+  for (const actionId of ["open", "canvas"]) {
+    await r.run({
+      type: "event", name: "card-action", callId: "call-one", spawnCallId: "clicked",
+      actionId, sessionId: sid, mobilePageId: "phone-source",
+    });
+    assert.equal(r.calls.filter(x => x.preview).length, 0);
+    assert.match(r.sent.at(-1).html, /Open the HTML file in the reply/);
+  }
+  await r.run({type:"event",name:"card-action",callId:"call-one",actionId:"open",sessionId:sid});
+  assert.equal(r.calls.filter(x => x.preview).length, 1);
+});
+// Unit: create/read/update/reopen must all expose the same existing file, so
+// remote users do not depend on a card's execution-computer-local editor URL.
+test("every draft entry returns a stable standard file link including escaped paths", async () => {
+  const filePath = "/project/design #1/稿件 ?100%<final>.html";
+  const r = runtime(new Map(), undefined, async ({method}) => method === "prepare"
+    ? {dir:"/project/design #1"} : method === "bind" ? {files:[]}
+    : {html:"<h1>Draft</h1>",revision:"r1",previewPath:filePath,sketches:[]});
+  for (const tool of ["opendesign_new","opendesign_context","opendesign_update","opendesign_open","opendesign_preview"]) {
+    await r.tool(tool, {html:"<h1>Draft</h1>",expectedRevision:"r1",title:"[Do not use as markup](bad)"});
+    const result = r.sent.at(-1).result;
+    assert.equal(r.sent.at(-1).ok,true);
+    assert.equal(result.previewPath,filePath);
+    const target = /^\[View design\]\(<([^>]+)>\)$/.exec(result.previewMarkdown)[1];
+    assert.equal(decodeURIComponent(target),filePath);
+    assert.doesNotMatch(target,/[?#<>\s]/);
+    assert.equal(r.calls.filter(x => x.preview).length,0);
+  }
 });
 test("untrusted, remote and readonly contexts do nothing", async () => {
   for (const context of [
@@ -234,7 +269,7 @@ test("runtime cards use host locale and English fallback without translating use
     const card=r.sent.find(x=>x.type==='card-update').html;
     assert.ok(card.includes(locale==='zh-CN'?'· 稿件 ':'· Draft '));
     await r.run({type:'event',name:'card-action',callId:'call-one',spawnCallId:'opened',actionId:'open',sessionId:sid});
-    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'稿件已在所属会话':'owning session sidebar'));
+    assert.ok(r.sent.find(x=>x.callId==='opened').html.includes(locale==='zh-CN'?'已发送稿件打开请求':'request to open the design has been sent'));
     const named=runtime(new Map(),undefined,undefined,locale);
     await named.tool('opendesign_new',{html:'<h1>Content</h1>',title:'用户自定义标题'});
     assert.equal(named.sent.at(-1).result.title,'用户自定义标题');
