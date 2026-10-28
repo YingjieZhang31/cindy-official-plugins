@@ -1067,6 +1067,8 @@ test('the 2026.10.28 sync keeps the new community write path on the plugin path'
   // the top-level routing names the posting-media path.
   assert.match(shared, /域内上传例外是 `community-management \+upload-image` 与 `\+upload-video`/);
   assert.match(shared, /社区 `\+upload-image` \/ `\+upload-video` 省略时按内容派生/);
+  assert.match(shared, /`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传/);
+  assert.match(top, /一级回复只用图片 `\+upload-image`/);
   assert.match(top, /\| 把本地图片或视频传成帖子素材[^|]*\| `community-management`/);
   assert.match(handbooks, /发布后的社区发帖/);
 

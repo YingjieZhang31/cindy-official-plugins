@@ -103,7 +103,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 - 默认输出 JSON，支持的 `--format` 只有 `json` 和 `pretty`；普通 Agent 调用不追加冗余的 `--format json`。
 - 上传 preview 使用 `--dry-run`；用户确认后用相同文件与 scope 追加 `--yes`。省略 `--yes` 的确认门禁是 exit code `10`。
-- 顶层 `ok=true` / exit code `0` 才表示 shortcut 成功。部分失败或其它错误是非零退出；保留响应中已有的远端句柄，只重试没有句柄的文件。
+- 顶层 `ok=true` / exit code `0` 才表示 shortcut 成功。部分失败或其它错误是非零退出；保留响应中已有的远端句柄。重试只适用于明确未生效的情况（`execution_state: not_executed`，或逐项失败里明确没开始的项）；`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传——先核对远端是否已有该 URL / `videoId` / 对象句柄，确认没有产出再按同一意图重放（复用同一个 `--idempotency-key`）。
 - 六个素材库 shortcut 都注册 `--idempotency-key`（省略时由 CLI 自动派生），但只有素材库 `upload` 必须显式提供稳定 key；社区 `+upload-image` / `+upload-video` 省略时按内容派生。顶层 `upload-video` 的 preview 会读取实时 `video_spec`；社区两个上传的 preview 都是纯本地，不发网络请求。
 - H5 上传任务和遗留 Tap 小游戏上传任务的状态与恢复由 CLI task workflow 负责；Skill 只能使用 `task +list|get|resume`，不能重新发起协议阶段。
 
