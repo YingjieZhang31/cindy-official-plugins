@@ -902,6 +902,90 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
 });
 
+test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {
+  // CLI v2026.10.28 turns the forum domain from read-only into read + write:
+  // post drafts and publishing, first-level and child replies, and two upload
+  // shortcuts. The bundled manual is the only path the agent may take, so each
+  // new reference is adapted to call_tool instead of copied as a shell command.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const community = read('taptap-suite/references/taptap-community-management/MANUAL.md');
+  const post = read('taptap-suite/references/taptap-community-management/references/publish-post.md');
+  const reply = read('taptap-suite/references/taptap-community-management/references/reply-moment.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const uploadVideo = read('taptap-suite/references/taptap-community-management/references/upload-video.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const routing = read('taptap-suite/references/business-routing.md');
+  const handbooks = read('taptap-suite/references/operation-handbooks.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const rules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
+
+  // The domain is no longer advertised as read-only, and routing agrees.
+  assert.doesNotMatch(community, /community-management 是\*\*只读\*\*入口/);
+  assert.doesNotMatch(routing, /论坛管理当前只读/);
+  for (const reference of ['upload-image.md', 'upload-video.md', 'publish-post.md', 'reply-moment.md']) {
+    assert.match(community, new RegExp(reference.replace('.', '\\.')), `${reference} must be referenced`);
+  }
+
+  // Publishing is the irreversible step: preview first, publish next turn.
+  assert.match(post, /同一轮内禁止 create-draft → publish-draft 连跑/, 'publish is cross-turn');
+  assert.match(post, /call_tool\(name:"community-management publish-community-topic-draft"/);
+  assert.match(post, /`draft_id` 不要写进 `document`/, 'the nested-shape trap must stay documented');
+  assert.match(post, /`contents` 是字符串不是数组/);
+  assert.match(reply, /call_tool\(name:"community-management create-community-moment-reply-child"/);
+  assert.match(reply, /`parent_reply_id` 必须是一级回复/);
+  assert.match(uploadImage, /没有 `assetId`/, 'community images are not asset-library handles');
+  assert.match(uploadImage, /`width` \/ `height` 必须回传/);
+  assert.match(uploadVideo, /`normal` \/ `transcoding` \/ `regulating` 都算正常/);
+  assert.match(uploadVideo, /complete-community-moment-video-upload/);
+
+  for (const [label, text] of [
+    ['publish post', post],
+    ['reply moment', reply],
+    ['upload image', uploadImage],
+    ['upload video', uploadVideo],
+  ]) {
+    assert.match(text, /call_tool\(name:"community-management /, `${label} must call through the plugin`);
+    assert.doesNotMatch(text, /taptap-cli community-management/, `${label} must not hand over a shell command`);
+  }
+
+  // Shared rules: the two community uploads are a domain-local exception, and
+  // the top-level routing names the posting-media path.
+  assert.match(shared, /域内上传例外是 `community-management \+upload-image` 与 `\+upload-video`/);
+  assert.match(shared, /社区 `\+upload-image` \/ `\+upload-video` 省略时按内容派生/);
+  assert.match(top, /\| 把本地图片传成帖子配图[^|]*\| `community-management`/);
+  assert.match(handbooks, /发布后的社区发帖/);
+
+  // Precheck: `preaudit_status` is the primary signal, and "unavailable" is a
+  // third state rather than a failure or a content rejection.
+  for (const [label, text] of [
+    ['shared', shared],
+    ['audit', audit],
+    ['app-edit', appEdit],
+    ['rules', rules],
+    ['top', top],
+  ]) {
+    assert.match(text, /preaudit_status/, `${label} must use the tri-state signal`);
+    assert.match(text, /unavailable/, `${label} must name the "not run" state`);
+  }
+  assert.match(audit, /机审没跑成，没有结论/, 'the third state must be explained in the return table');
+  assert.doesNotMatch(audit, /`preaudit_passed === false`（机审未通过）/, 'the old boolean is not the verdict');
+
+  // No carrier may keep calling the forum read-only, including the manifest's
+  // four locale descriptions the agent reads instead of the manifest.
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    const resource = JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'));
+    assert.doesNotMatch(
+      resource.description,
+      /只读|read-only|読み取り専用|읽기 전용/,
+      `${locale} must stop describing the forum as read-only`,
+    );
+  }
+});
+
 test('nothing shipped points at the internal taptap/cli repository', () => {
   // The GitHub repository is internal; only the npm package is public. Any
   // link to the repository is therefore a dead end for the people who install
