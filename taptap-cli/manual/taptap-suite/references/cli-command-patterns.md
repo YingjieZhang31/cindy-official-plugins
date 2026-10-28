@@ -114,7 +114,7 @@ call_tool(name:"overview", args:{dev_id:"<N>"})
 
 资料与包体的本地物料统一走 `taptap-materials` skill（路由与边界见 [business routing](taptap-suite/references/business-routing.md)）。它负责盘点、确认用途、逐项调用六个端到端 shortcut，并把资料字段和包体绑定交给对应业务 skill。
 
-**CRITICAL — 社区帖子的配图/视频不走这套**：要发到论坛帖子或回复里的图片、视频，用 `community-management +upload-image` / `+upload-video`（见 `taptap-community-management` 的 upload image / upload video / publish post 手册）。它们不建素材库记录、不写资料字段，产物（`url` / `videoId`）只在发帖请求里有意义；两条链路权限不同、句柄不可互换，不要用这里的 `upload` / `upload-video` 顶替社区上传。
+**CRITICAL — 社区帖子的配图/视频不走这套**：帖子图片、视频分别用 `community-management +upload-image` / `+upload-video`（见 upload image / upload video / publish post 手册）。一级回复只支持文字和图片，图片同样用 `+upload-image`；子回复只支持文字，所有回复都不支持视频（见 reply moment 手册）。它们不建素材库记录、不写资料字段，图片产物 `url` 可用于帖子或一级回复，`videoId` 只用于帖子；两条链路权限不同、句柄不可互换，不要用这里的 `upload` / `upload-video` 顶替社区上传。
 
 - `materials +inspect <directory|archive>` 是该 skill 所需的只读盘点契约；它输出 manifest、skipped 和 handoff，供后续逐项上传。
 - 当前用户只提供目录或混合 zip 时，先 `call_tool(name:"materials", args:{_positional:["+inspect","<目录或zip>"]})`，再让用户确认 manifest 中的歧义项和每个文件用途；然后按下方六个 shortcut 执行。不要把旧的批量写入命令作为替代。
