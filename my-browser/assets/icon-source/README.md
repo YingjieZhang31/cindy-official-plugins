@@ -1,0 +1,22 @@
+# Cindy toolbar mark
+
+Sources for all of the extension's icons (toolbar, context menu, extensions page, store). The silhouette and
+hair strands are the Cindy desktop menu-bar mark
+(`apps/desktop/native/menubar/macos-menubar-helper.swift` in the client repo),
+drawn in `#15161c` on a white rounded tile with a light border, with the earring in Cindy red `#F70121`.
+
+- `toolbar.svg`: full detail (strands, earring), rendered at 24, 32 and 48 px, and at 96 px inside a 128 px canvas (16 px transparent margin, as the Chrome Web Store asks).
+- `toolbar-small.svg`: silhouette only, slightly larger, rendered at 16 px.
+
+Render the PNGs at their exact pixel size (device scale 1) into
+`extension/icons/mark-{16,24,32,48,128}.png`. The illustrated `16/32/48/128.png`
+remain only for the in-page brand image and tests.
+
+Toolbar (0.4.40): `action-light.svg` / `action-dark.svg` (and `-small` for 16 px)
+draw the silhouette without a tile, filling the canvas, near-black or near-white
+with the Cindy-red earring. They render to `extension/icons/action-{light,dark}-{16,24,32}.png`;
+the background switches between them from the appearance pages report.
+
+Plugin icon (host package 0.4.68): `plugin.svg` draws a browser window with a Cindy-red frame and
+title bar holding the same silhouette and red earring on a white tile, matching the other official
+plugins' single-symbol tiles. Render it at 256 px (device scale 1) into `assets/icon.png`.

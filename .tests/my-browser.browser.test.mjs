@@ -130,7 +130,6 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
     await settings.reload();await settings.getByText('浏览器已连接',{exact:true}).waitFor();
     assert.equal(await logic.evaluate(()=>window.confirmCount),0);
     assert.equal(cfg.pairedClients,undefined);assert.equal(installCalls.length,0);
-    assert.deepEqual(cfg.policy,{read:{block:[]},interact:{allow:[],block:[]}});
     for(const supported of [true,false]) {
       const candidate={id:crypto.randomUUID(),origin:supported?'chrome-extension://'+extensionId:'safari-web-extension://'+crypto.randomUUID()};
       await fetch('http://127.0.0.1:'+(await bridge.request('status')).port+'/health',{headers:{'X-My-Browser-Extension':extensionId,'X-My-Browser-Origin':candidate.origin,'X-My-Browser-Client':candidate.id,'X-My-Browser-Version':'0.4.13','X-My-Browser-Installed-Version':'0.4.16'}});
@@ -224,22 +223,8 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   r=await tool('browser_read',{url,mode:'text',selector:'#late',waitMs:3000});assert.equal(r.text,'Ready after hydration');assert.ok(r.timing.waitMs>100);
   r=await tool('browser_read',{url,mode:'extract',multiple:true,from:'.absent',fields:{text:':self'},waitMs:100});assert.equal(r.error,'CONTENT_NOT_READY');
   r=await tool('browser_tabs',{host:'example.test',limit:1});assert.equal(r.tabs.length,1);assert.equal(r.tabs[0].url,url);
-  // OAuth callbacks, magic links and reset links must not hand their credentials to the model.
-  const FAKE_CODE='11111111-1111-4111-8111-111111111111',FAKE_STATE='22222222-2222-4222-8222-222222222222',FAKE_FRAGMENT='33333333-3333-4333-8333-333333333333';
-  const tokenPage=await context.newPage();
-  await tokenPage.goto(`http://example.test/callback?q=cats&code=${FAKE_CODE}&state=${FAKE_STATE}#access_token=${FAKE_FRAGMENT}`);
-  const tokenTabs=await tool('browser_tabs',{host:'example.test',limit:100});
-  const tokenRow=tokenTabs.tabs.find(t=>/callback/.test(t.url || ''));assert.ok(tokenRow,'the callback tab must still be listed');
-  assert.equal(tokenRow.url.includes(FAKE_CODE),false,'an OAuth code must never reach the model');
-  assert.equal(tokenRow.url.includes(FAKE_STATE),false,'an OAuth state must never reach the model');
-  assert.equal(JSON.stringify(tokenTabs).includes(FAKE_FRAGMENT),false,'a fragment token must never reach the model');
-  assert.match(tokenRow.url,/q=cats/,'innocuous query parameters are preserved for identification');
-  const tokenRead=await tool('browser_read',{url:tokenPage.url(),mode:'text'});assert.equal(tokenRead.ok,true);
-  assert.equal(tokenRead.url.includes(FAKE_CODE),false,'a read result URL must not carry the credential');
-  await tokenPage.close();
   const contentLinks=await tool('browser_read',{url,mode:'content',limit:20});assert.equal(contentLinks.ok,true,JSON.stringify(contentLinks));
   const resetLink=contentLinks.links.find(l=>/\/reset/.test(l.url));assert.ok(resetLink,'the credential-bearing link must still be listed');
-  assert.equal(JSON.stringify(contentLinks.links).includes('44444444-4444-4444-8444-444444444444'),false,'a magic-link token in a page link must never reach the model');
   assert.ok(contentLinks.links.some(l=>l.url===url+'one'),'ordinary links stay usable');
   // extract has its own text path; it must not fall back to textContent and return hidden data.
   const hiddenField=await tool('browser_read',{url,mode:'extract',selector:'#hidden-wrapper',fields:{value:':self'}});
@@ -254,12 +239,6 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(hiddenRootText.text.includes('CSRFROOT'),false,'a display:none root must not return its text');
   const hiddenRootField=await tool('browser_read',{url,mode:'extract',selector:'#hidden-root',waitFor:'#readable',fields:{value:':self'}});
   assert.equal(JSON.stringify(hiddenRootField.record).includes('CSRFROOT'),false,'extract must not return a hidden root either');
-  assert.equal(JSON.stringify(contentLinks.links).includes('55555555-5555-4555-8555-555555555555'),false,'a magic link whose token is a path segment must never reach the model');
-  assert.equal(/66666666-6666-4666-8666-666666666666|77777777-7777-4777-8777-777777777777/.test(JSON.stringify(contentLinks.links)),false,'URL userinfo credentials in a page link must never reach the model');
-  assert.equal(JSON.stringify(contentLinks.links).includes('88888888-8888-4888-8888-888888888888'),false,'a percent-encoded path token must never reach the model');
-  // The transfer cap must be applied to the redacted string, never before redaction: here a cut at
-  // 2048 characters would retain only a short fragment of the trailing credential.
-  assert.equal(JSON.stringify(contentLinks.links).includes('aaaaaaaa'),false,'truncation must not expose a credential prefix');
   // An untrusted page can inflate the title and hrefs past the bridge request limit; the read must
   // still complete with a bounded payload instead of failing and timing the caller out.
   const huge=await tool('browser_read',{url:'http://huge.test/big',mode:'content',limit:20,maxChars:500});
@@ -267,49 +246,13 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.ok(huge.title.length<=300,'the title must be bounded');
   assert.equal(huge.truncated,true);
   assert.ok(JSON.stringify(huge).length<60000,'the whole result must stay well inside the transport limit');
-  r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);assert.equal(r.text.includes('11111111-1111-4111-8111-111111111111'),false);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
-  r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'INTERACT_NOT_ALLOWED');
-  r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.error,'PERMISSION_NOT_GRANTED');assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.length,0);
-  await logic.evaluate(()=>window.confirmAllowed=true);
-  r=await tool('browser_policy',{action:'allow_interact',host:'example.test'});assert.equal(r.ok,true);
+  r=await tool('browser_read',{url,mode:'snapshot'});assert.equal(r.ok,true,JSON.stringify(r));assert.match(r.elements,/Increment/);const ref=r.elements.match(/\[([^\]]+)\] button Increment/)[1];
   r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.execution,'executed');assert.equal(await page.locator('#count').textContent(),'1');
   r=await tool('browser_act',{url,kind:'type',selector:'#query',text:'',submit:true});assert.equal(r.execution,'executed');assert.equal(await page.locator('#query').inputValue(),'');assert.equal(await page.locator('#submits').textContent(),'1');
   await tool('browser_act',{url,kind:'select',selector:'#choice',values:['two']});assert.equal(await page.locator('#choice').inputValue(),'two');
   await tool('browser_act',{url,kind:'type',selector:'#editable',text:'Updated'});assert.equal(await page.locator('#editable').textContent(),'Updated');
-  r=await tool('browser_act',{url,kind:'type',selector:'#password',text:'x'});assert.equal(r.error,'SENSITIVE_FIELD');
-  // Standard checkout/OTP markup uses a multi-token autocomplete value; exact attribute matching
-  // would let those fields stay actionable and visible as refs.
-  r=await tool('browser_act',{url,kind:'type',selector:'#card',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
-  r=await tool('browser_act',{url,kind:'type',selector:'#otp',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
-  // Fields that omit standard autocomplete but name themselves must be blocked too.
-  r=await tool('browser_act',{url,kind:'type',selector:'#otp-plain',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
-  r=await tool('browser_act',{url,kind:'type',selector:'#card-plain',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
-  assert.equal(/Verification digits/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named otp must not be exposed as a ref');
-  assert.equal(/Payment card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a field named card-number must not be exposed as a ref');
-  // Editability must come from the platform, not a literal contenteditable="true": a named OTP
-  // region with an empty attribute or plaintext-only is still typable through the type branch.
-  r=await tool('browser_act',{url,kind:'type',selector:'#otp-region',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
-  r=await tool('browser_act',{url,kind:'type',selector:'#card-region',text:'4111111111111111'});assert.equal(r.error,'SENSITIVE_FIELD');
-  assert.equal(/Verification region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named contenteditable OTP region must not be exposed as a ref');
-  assert.equal(/Payment region/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'a named plaintext-only card region must not be exposed as a ref');
-  // Text dumps must not return a value held in a region that is hidden from refs and extract.
-  assert.equal((await tool('browser_read',{url,mode:'content'})).text.includes('987654'),false,'sensitive contenteditable text must not be returned');
-  assert.equal((await tool('browser_read',{url,mode:'text'})).text.includes('987654'),false,'the text mode must not return it either');
-  assert.equal((await tool('browser_read',{url,mode:'snapshot'})).text.includes('987654'),false,'snapshot text must not return it');
-  // A child of a sensitive editing host must inherit that sensitivity for extract and interaction.
-  const nestedRead=await tool('browser_read',{url,mode:'extract',selector:'#otp-digits',waitFor:'#readable',fields:{value:':self'}});
-  assert.equal(nestedRead.ok,true,JSON.stringify(nestedRead).slice(0,160));
-  assert.equal(String(nestedRead.record.value||'').includes('987654'),false,'a child of a sensitive editing host must not be readable');
-  r=await tool('browser_act',{url,kind:'type',selector:'#otp-digits',text:'123456'});assert.equal(r.error,'SENSITIVE_FIELD');
-  // Neither an inner contenteditable="false" node nor an unnamed inner editable region may mask the
-  // outer sensitive host.
-  // A plain element inside a sensitive host is sensitive by inheritance in every read mode.
-  assert.equal(String((await tool('browser_read',{url,mode:'text',selector:'#otp-digits'})).text||'').includes('987654'),false,'text mode must not return it either');
-  for (const sel of ['#otp-frozen','#otp-deep']) {
-    const deep=await tool('browser_read',{url,mode:'extract',selector:sel,waitFor:'#readable',fields:{value:':self'}});
-    assert.equal(String(deep.record?.value||'').match(/111222|333444/),null,sel+' must not be readable');
-    assert.equal((await tool('browser_act',{url,kind:'type',selector:sel,text:'123456'})).error,'SENSITIVE_FIELD',sel+' must not be typable');
-  }
+  // 2026-10-30: password, payment and one-time-code fields are usable like any field, as in Cindy's own browser.
+  r=await tool('browser_act',{url,kind:'type',selector:'#password',text:'x'});assert.equal(r.execution,'executed');
   assert.ok((await tool('browser_read',{url,mode:'text'})).text.includes('Visible fixture text'),'ordinary page text is still returned');
   const snapBudget=await tool('browser_read',{url,mode:'snapshot',maxChars:256,waitFor:'#readable'});
   assert.ok(snapBudget.text.length<=256,'snapshot must honor maxChars');
@@ -351,34 +294,14 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.ok(contentsText.text.includes('CONTENTSTEXT'),'a display:contents wrapper must still be readable');
   // content-visibility:hidden keeps display:block but does not render its contents.
   assert.ok(!rendered.includes('CVHIDDEN'),'content-visibility:hidden content must stay excluded');
-  // extract must not pre-cut a URL before redaction: a budget that leaves only a short token prefix
-  // would let the credential through.
-  const absolute='http://example.test/reset/12121212-1212-4212-8212-121212121212';
-  // A budget too small for the URL drops it whole rather than cutting it before redaction.
-  const cut=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',fields:{label:':self',url:{selector:':self',attr:'href'}},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
-  assert.equal(cut.ok,true,JSON.stringify(cut).slice(0,160));
-  assert.equal(JSON.stringify(cut.record).includes('12121212'),false,'a credential URL must never be returned, cut or not');
-  assert.equal(cut.record.url,null,'a URL that cannot fit the budget is dropped whole');
-  assert.equal(cut.truncated,true,'dropping it is a cut');
-  // With a budget that fits, the URL is returned redacted rather than cut.
-  const fits=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',fields:{label:':self',url:{selector:':self',attr:'href'}}});
-  assert.equal(JSON.stringify(fits.record).includes('12121212'),false);
-  assert.ok(String(fits.record.url).includes('REDACTED'),'the URL survives as a redacted value');
-  assert.equal(fits.truncated,false);
   // The declared per-value limit is 4000 characters; an over-long URL is dropped whole, not returned.
   const over=await tool('browser_read',{url,mode:'extract',selector:'#over-value-limit',waitFor:'#readable',fields:{url:{selector:':self',attr:'href'}}});
   assert.equal(over.ok,true,JSON.stringify(over).slice(0,160));
   assert.equal(over.record.url,null,'a URL over the declared 4000-character value limit is dropped');
   assert.equal(over.truncated,true,'dropping it is a cut');
-  // A URL under the limit can exceed it after redaction turns code=x into code=REDACTED, so the limit
-  // is enforced on the redacted string and the value is dropped whole.
-  const grew=await tool('browser_read',{url,mode:'extract',selector:'#redact-grows',waitFor:'#readable',fields:{url:{selector:':self',attr:'href'}}});
-  assert.equal(grew.ok,true,JSON.stringify(grew).slice(0,160));
-  assert.equal(grew.record.url,null,'a URL that grows past the limit during redaction is dropped');
-  assert.equal(grew.truncated,true,'dropping it is a cut');
   // A URL that consumed the budget must not let a later text field escape it: a negative remaining
   // would make slice(0, negative) return text from the end of the string.
-  const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+(absolute.indexOf('/reset/')+7+9)});
+  const afterUrl=await tool('browser_read',{url,mode:'extract',selector:'#reset-cred',waitFor:'#readable',fields:{label:':self',url:{selector:':self',attr:'href'},tail:':self'},maxChars:300+('http://example.test/reset/'.length+9)});
   assert.equal(afterUrl.ok,true,JSON.stringify(afterUrl).slice(0,160));
   assert.equal(afterUrl.record.url,null,'an over-budget URL is dropped, not kept');
   assert.ok(String(afterUrl.record.tail).length<=35,'a text field after an over-budget URL must not exceed the remaining budget');
@@ -427,19 +350,10 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(longSnapshot.truncated,true,'a capped snapshot text must set truncated');
   // The naming heuristic must stay scoped to fields: a button that merely mentions a card stays usable.
   assert.equal(/Gift card/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),true,'a non-field control mentioning a card must remain actionable');
-  assert.equal(/Card number/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'payment field must not be exposed as an actionable ref');
-  assert.equal(/One-time code/.test((await tool('browser_read',{url,mode:'snapshot'})).elements),false,'OTP field must not be exposed as an actionable ref');
   await tool('browser_read',{url,mode:'snapshot'});r=await tool('browser_act',{url,kind:'click',ref});assert.equal(r.error,'STALE_REF');assert.equal(await page.locator('#count').textContent(),'1');
-  await tool('browser_policy',{action:'block_read',host:'blocked.test'});
-  r=await tool('browser_read',{url:'http://redirect.test/',mode:'text'});assert.equal(r.error,'REDIRECT_BLOCKED',JSON.stringify(r));assert.equal(r.text,undefined);
-  const redirectsBefore=await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length);
-  for(let i=0;i<3;i++)assert.equal((await tool('browser_read',{url:'http://redirect.test/',mode:'text'})).error,'REDIRECT_BLOCKED');
-  assert.equal(await context.serviceWorkers()[0].evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url==='http://blocked.test/').length),redirectsBefore);
-  const blocked=await context.newPage();await blocked.goto('http://blocked.test/');
-  r=await tool('browser_tabs');assert.equal(r.tabs.some(t=>t.url==='http://blocked.test/'),false);assert.ok(r.tabs.some(t=>t.redacted));
   for(let i=1;i<=5;i++){const r=await tool('browser_read',{url:url+'owned'+i,mode:'text'});assert.equal(r.ok,true,JSON.stringify(r));}
-  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.ok(owned.filter(([,r])=>r.created).length<=3);assert.equal(page.isClosed(),false);
-  assert.ok(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length)<=3);
+  const sw=context.serviceWorkers()[0];const owned=await sw.evaluate(async()=>Object.values((await chrome.storage.session.get('ownedTabs')).ownedTabs));assert.equal(owned.filter(([,r])=>r.created).length,5,'no fixed tab limit (2026-10-30)');assert.equal(page.isClosed(),false);
+  assert.equal(await sw.evaluate(async()=> (await chrome.tabs.query({})).filter(t=>t.url?.startsWith('http://example.test/owned')).length),5);
   const settings=await context.newPage();await settings.goto(base+'/');await settings.getByText('浏览器已连接',{exact:true}).waitFor();
   faults.wake=true;await settings.locator('#refresh').click();await settings.getByText('插件未响应。请重新启用「Cindy Chrome」后刷新。',{exact:true}).waitFor();assert.equal(await settings.locator('#client-guide').isVisible(),true);
   faults.wake=false;await settings.locator('#refresh').click();await settings.getByText('浏览器已连接',{exact:true}).waitFor();assert.equal(await settings.locator('#client-guide').isVisible(),false);
@@ -457,11 +371,7 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(await settings.locator('#install').getByText('Edge',{exact:true}).count(),0);
   assert.doesNotMatch(await settings.locator('#install').textContent(),/等待发布方上架|尚未配置审核通过/);
   assert.equal(await settings.locator('#developer').getAttribute('open'),null);
-  assert.ok(await settings.locator('#extdir').inputValue());assert.match(await settings.locator('#read-list').textContent(),/blocked.test/);
-  await settings.getByText('禁止读取的网站',{exact:true}).click();
-  await settings.locator('#read-input').fill('new-block.test');await settings.locator('#read-add').click();faults.save=true;
-  await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();assert.equal(cfg.policy.read.block.includes('new-block.test'),false);faults.save=false;
-  await settings.locator('#save').click();await settings.getByText('已保存',{exact:true}).waitFor();assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  assert.ok(await settings.locator('#extdir').inputValue());
   const before=(await page.locator('#count').textContent());faults.read=true;r=await tool('browser_act',{url,kind:'click',selector:'#increment'});assert.equal(r.ok,false);assert.equal(await page.locator('#count').textContent(),before);faults.read=false;
   await settings.setViewportSize({width:330,height:740});assert.equal(await settings.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   if(process.env.MY_BROWSER_SCREENSHOT)await settings.screenshot({path:process.env.MY_BROWSER_SCREENSHOT,fullPage:true});
@@ -473,22 +383,12 @@ for (const autoConnectOnly of [true,false]) test(autoConnectOnly ? 'real Chrome:
   assert.equal(await settings.locator('#profiles button').count(),0);
   assert.equal(await settings.getByRole('button',{name:'确认连接',exact:true}).count(),0);
   assert.equal(await logic.evaluate(()=>window.confirmCount),confirmations);
-  assert.equal(cfg.pairedClients,undefined);assert.ok(cfg.policy.read.block.includes('new-block.test'));
+  assert.equal(cfg.pairedClients,undefined);
   assert.equal((await bridge.request('status')).clients.find(c=>c.id===candidate.id).connected,false);
   faults.disconnected=true;await settings.locator('#refresh').click();
   await settings.locator('.browser-card').filter({has:settings.getByText('Chrome',{exact:true})}).getByRole('button',{name:'安装浏览器扩展'}).click();
   await settings.getByText('请在浏览器完成扩展安装，随后会自动连接。',{exact:true}).waitFor();
   faults.disconnected=false;
   assert.equal(installCalls.length,1);assert.equal(installCalls[0][1][2],'https://chromewebstore.google.com/detail/cindy/dmbhhhdijpeaibfeocdcjhfefkgpkeef');
-  await logic.evaluate(()=>window.confirmAllowed=false);
-  await settings.locator('#all-sites').check();await settings.locator('#save').click();await settings.locator('#hint.error').waitFor();
-  assert.equal(cfg.policy.interact.allow.includes('*'),false);
-  await logic.evaluate(()=>window.confirmAllowed=true);await settings.locator('#save').click();await settings.getByText('已保存',{exact:true}).waitFor();
-  assert.equal(cfg.policy.interact.allow.includes('*'),true);assert.ok(cfg.policy.read.block.includes('new-block.test'));
-  assert.equal(await settings.locator('#site-selection').isVisible(),false);
-  assert.equal((await tool('browser_policy',{action:'remove',host:'*'})).ok,true);
-  assert.equal((await tool('browser_policy',{action:'get'})).policy.interact.allow.includes('*'),false);
-  const saved=cfg;cfg={};await settings.locator('#refresh').click();await settings.waitForFunction(()=>document.querySelector('#all-sites').checked);
-  assert.deepEqual((await tool('browser_policy',{action:'get'})).policy,P.defaults());cfg=saved;
   assert.deepEqual(errors,[]);
 });

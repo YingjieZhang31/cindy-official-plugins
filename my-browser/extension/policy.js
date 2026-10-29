@@ -1,9 +1,13 @@
 'use strict';
 // One policy implementation shared by the sandbox, Node bridge and extension.
 (function (root) {
-  const READ = ['tabs', 'navigate', 'snapshot', 'extract', 'text', 'content'];
-  const EXTRACT_ATTRIBUTES = ['href','src','datetime','title','alt','aria-label','role'];
-  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll'];
+  // Parity with Cindy's dedicated browser: the user picks which browser the agent uses, so the
+  // user's own browser offers the same actions. What it must not do is disturb the user's own
+  // browsing: new pages open in a separate background window and nothing steals focus.
+  const READ = ['tabs', 'navigate', 'open', 'snapshot', 'extract', 'text', 'content', 'screenshot', 'console', 'requests', 'responseBody', 'wait', 'pdf', 'debuggerAccess', 'unmark'];
+  const INTERACT = ['click', 'type', 'press', 'select', 'hover', 'scroll', 'focus', 'close', 'upload', 'evaluate', 'clickCoords', 'drag', 'dialog', 'resize', 'cdp'];
+  // Actions that address no page: listing tabs, and checking or granting the on-demand debugger.
+  const UNADDRESSED = ['tabs', 'debuggerAccess', 'unmark'];
   const defaults = () => ({ read: { block: [] }, interact: { allow: ['*'], block: [] } });
   function normalizeHost(value) {
     if (typeof value !== 'string') throw new Error('Enter a domain, for example example.test.');
@@ -11,16 +15,16 @@
     const exact = text.startsWith('=');
     const raw = exact ? text.slice(1) : text.replace(/^\*\./, '');
     if (/^\[[0-9a-f:.]+\]$/.test(raw)) {
+      // Local and private addresses are allowed like any site (2026-10-28), so they can be listed too.
       const host=new URL('https://'+raw).hostname;
-      if(isLocal(host))throw new Error('Local and private addresses are not supported.');
       return (exact?'=':'')+host;
     }
     if (!raw || /[\s/@:?#\\]/.test(raw)) throw new Error('Enter a domain only, without a URL, port or path.');
     const host = new URL('https://' + raw).hostname;
     if (host !== raw && !/[^\x00-\x7f]/.test(raw)) throw new Error('Invalid domain.');
-    if (host.length > 253 || !host.includes('.') || host.endsWith('.') ||
+    // Single-label intranet names (jira, localhost) are valid entries.
+    if (host.length > 253 || host.endsWith('.') ||
         host.split('.').some(p => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(p))) throw new Error('Invalid domain.');
-    if (isLocal(host)) throw new Error('Local and private addresses are not supported.');
     return (exact ? '=' : '') + host;
   }
   function publicLiteral(ip) {
@@ -48,6 +52,9 @@
   function matches(host, pattern) {
     return pattern === '*' || (pattern.startsWith('=') ? host === pattern.slice(1) : host === pattern || host.endsWith('.' + pattern));
   }
+  // DevTools methods a site recipe may send with `cdp op:"command"`: exactly what Cindy's recipe
+  // runtime uses. Everything else (Network.getAllCookies, Runtime.evaluate, Target.*, …) is refused.
+  // Cookie reads through the debugger are limited to the site of the tab it is attached to.
   function normalizePolicy(p) {
     if (!p || !p.read || !p.interact) throw new Error('Invalid policy. Reload settings before saving.');
     const list = (items, wildcard = false) => {
@@ -59,29 +66,48 @@
   function check(policy, action, url) {
     const deny = (error, message, host) => ({ ok: false, error, message, host, execution: 'not_executed' });
     if (!READ.includes(action) && !INTERACT.includes(action)) return deny('INVALID_ACTION', 'Choose a supported browser action.');
-    if (action === 'tabs') return { ok: true };
+    if (UNADDRESSED.includes(action)) return { ok: true };
     let u;
     try { u = new URL(url); } catch { return deny('INVALID_URL', 'Provide a full HTTP or HTTPS URL.'); }
-    if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || isLocal(u.hostname.replace(/\.$/, ''))) {
-      return deny('URL_NOT_ALLOWED', 'Only public HTTP/HTTPS URLs without embedded credentials are supported.');
+    if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) {
+      return deny('URL_NOT_ALLOWED', 'Only HTTP/HTTPS URLs without embedded credentials are supported.');
     }
-    const host = u.hostname.toLowerCase().replace(/\.$/, '');
-    if (policy.read.block.some(p => matches(host, p))) return deny('READ_BLOCKED', 'This site is on the read block list. Review the site policy in plugin settings.', host);
-    if (INTERACT.includes(action) && (!policy.interact.allow.some(p => matches(host, p)) || policy.interact.block.some(p => matches(host, p)))) {
-      return deny('INTERACT_NOT_ALLOWED', 'Ask the user to allow this exact site before clicking, typing or searching.', host);
-    }
-    return { ok: true, host };
+    // No site lists (2026-10-30): the agent already has broad access, so safety is the task's permission
+    // mode and review, as in Cindy's own browser. A policy saved or sent by older versions is ignored.
+    return { ok: true, host: u.hostname.toLowerCase().replace(/\.$/, '') };
   }
   function validate(action, payload = {}) {
     if (!READ.includes(action) && !INTERACT.includes(action)) throw new Error('Unsupported browser action.');
-    if (action !== 'tabs' && (typeof payload.url !== 'string' || payload.url.length > 8192)) throw new Error('Provide a full URL of at most 8192 characters.');
+    if (!UNADDRESSED.includes(action) && (typeof payload.url !== 'string' || payload.url.length > 8192)) throw new Error('Provide a full URL of at most 8192 characters.');
     if (payload.browser != null && (typeof payload.browser !== 'string' || payload.browser.length > 128)) throw new Error('Invalid browser connection id.');
     if (payload.limit != null && (!Number.isInteger(payload.limit) || payload.limit < 1 || payload.limit > 100)) throw new Error('Limit must be 1–100.');
     if (payload.maxChars != null && (!Number.isInteger(payload.maxChars) || payload.maxChars < 256 || payload.maxChars > 30000)) throw new Error('maxChars must be 256–30000.');
     if (payload.waitMs != null && (!Number.isInteger(payload.waitMs) || payload.waitMs < 0 || payload.waitMs > 15000)) throw new Error('waitMs must be 0–15000.');
     if (payload.host != null) normalizeHost(payload.host);
     for (const key of ['selector', 'from', 'ref', 'text', 'key', 'waitFor', 'emptySelector', 'after']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > (key === 'text' ? 16000 : 2000))) throw new Error('Invalid ' + key + '.');
-    if (['click','type','select','hover'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
+    if (payload.tabId != null && (!Number.isInteger(payload.tabId) || payload.tabId < 0)) throw new Error('Invalid tab id.');
+    if (['click','type','select','hover','upload'].includes(action) && !payload.ref && !payload.selector) throw new Error('Provide a fresh snapshot ref or CSS selector.');
+    if (['focus','close','screenshot','console','requests','responseBody','evaluate','clickCoords','drag','dialog','resize','wait','pdf','cdp','unmark'].includes(action) && payload.tabId == null) throw new Error('This action needs the tab id from tabs or open.');
+    const finite = (v, lo, hi) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
+    if (action === 'clickCoords' && !payload.ref && !payload.selector && (!finite(payload.x, 0, 100000) || !finite(payload.y, 0, 100000))) throw new Error('clickCoords needs x and y in CSS pixels, or a ref or selector.');
+    if (payload.modifiers != null && (!Array.isArray(payload.modifiers) || payload.modifiers.length > 4 || payload.modifiers.some(m => !['Alt','Control','ControlOrMeta','Meta','Shift'].includes(m)))) throw new Error('modifiers must be Alt, Control, ControlOrMeta, Meta or Shift.');
+    if (action === 'drag' && !(payload.startRef || payload.startSelector || (finite(payload.startX, 0, 100000) && finite(payload.startY, 0, 100000)))) throw new Error('drag needs a start ref, selector or coordinates.');
+    if (action === 'drag' && !(payload.endRef || payload.endSelector || (finite(payload.endX, 0, 100000) && finite(payload.endY, 0, 100000)))) throw new Error('drag needs an end ref, selector or coordinates.');
+    if (action === 'resize' && (!finite(payload.width, 200, 10000) || !finite(payload.height, 200, 10000))) throw new Error('resize needs width and height of 200–10000.');
+    if (action === 'evaluate' && (typeof payload.fn !== 'string' || !payload.fn.trim() || payload.fn.length > 200000)) throw new Error('evaluate needs fn source of at most 200000 characters.');
+    if (action === 'responseBody' && (typeof payload.requestUrl !== 'string' || payload.requestUrl.length > 8192)) throw new Error('responseBody needs the request URL.');
+    if (action === 'dialog' && payload.promptText != null && (typeof payload.promptText !== 'string' || payload.promptText.length > 16000)) throw new Error('Invalid promptText.');
+    // Paths let Chrome read the files itself through the debugger; bytes are the fallback without it.
+    if (action === 'upload' && payload.files == null && payload.paths == null) throw new Error('upload needs files or paths.');
+    if (action === 'upload' && payload.files != null && (!Array.isArray(payload.files) || !payload.files.length || payload.files.length > 20 || payload.files.some(f => !f || typeof f.name !== 'string' || !f.name || f.name.length > 255 || typeof f.data !== 'string' || (f.mimeType != null && (typeof f.mimeType !== 'string' || f.mimeType.length > 200))))) throw new Error('upload needs 1–20 files with name and base64 data.');
+    if (action === 'upload' && payload.files != null && payload.files.reduce((n, f) => n + f.data.length, 0) > 40000000) throw new Error('Upload files must total at most about 30 MB.');
+    if (action === 'upload' && payload.paths != null && (!Array.isArray(payload.paths) || !payload.paths.length || payload.paths.length > 20 || payload.paths.some(p => typeof p !== 'string' || !p || p.length > 4096 || !(/^\//.test(p) || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\[^\\/]/.test(p))) || (payload.files != null && payload.files.length !== payload.paths.length))) throw new Error('upload paths must be 1–20 absolute file paths, one per file.');
+    for (const key of ['timeMs','timeoutMs']) if (payload[key] != null && !finite(payload[key], 0, 120000)) throw new Error(key + ' must be 0–120000.');
+    if (action === 'cdp' && !['begin','end','events','command'].includes(payload.op)) throw new Error('cdp op must be begin, end, events or command.');
+    if (action === 'cdp' && payload.op === 'command' && (typeof payload.method !== 'string' || !/^[A-Za-z]+\.[A-Za-z]+$/.test(payload.method))) throw new Error('cdp command needs a protocol method such as Network.getCookies.');
+    if (action === 'cdp' && payload.params != null && (typeof payload.params !== 'object' || Array.isArray(payload.params) || JSON.stringify(payload.params).length > 1000000)) throw new Error('cdp params must be an object of at most 1 MB.');
+    if (payload.loadState != null && !['load','domcontentloaded','networkidle'].includes(payload.loadState)) throw new Error('loadState must be load, domcontentloaded or networkidle.');
+    for (const key of ['textGone','urlIncludes','filter','startRef','endRef','startSelector','endSelector','button']) if (payload[key] != null && (typeof payload[key] !== 'string' || payload[key].length > 8192)) throw new Error('Invalid ' + key + '.');
     if (action === 'type' && typeof payload.text !== 'string') throw new Error('Typing requires text (an empty string clears the field).');
     if (action === 'press' && !payload.key) throw new Error('Provide the key to press.');
     if (action === 'select' && (!Array.isArray(payload.values) || payload.values.length > 100 || payload.values.some(v => typeof v !== 'string' || v.length > 2000))) throw new Error('Provide an array of option values.');
@@ -89,7 +115,7 @@
       if (!payload.fields || typeof payload.fields !== 'object' || Array.isArray(payload.fields) || !Object.keys(payload.fields).length || Object.keys(payload.fields).length > 30) throw new Error('Extract requires 1–30 fields.');
       if (Object.keys(payload.fields).some(k => !k || k.length > 32 || /[\x00-\x1f]/.test(k))) throw new Error('Field names must contain 1–32 printable characters.');
       for (const spec of Object.values(payload.fields)) {
-        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && !EXTRACT_ATTRIBUTES.includes(spec.attr))) throw new Error('Each field needs a CSS selector; attr may only be href, src, datetime, title, alt, aria-label or role.');
+        if (typeof spec === 'string' ? !spec || spec.length > 2000 : !spec || typeof spec.selector !== 'string' || !spec.selector || spec.selector.length > 2000 || (spec.attr != null && (typeof spec.attr !== 'string' || !/^[A-Za-z_:][-A-Za-z0-9_:.]{0,99}$/.test(spec.attr)))) throw new Error('Each field needs a CSS selector; attr must be an attribute name.');
       }
       if (payload.after != null && !payload.multiple) throw new Error('after requires multiple records.');
     }
@@ -189,7 +215,7 @@
     if (redactedPath !== u.pathname) { u.pathname = redactedPath; changed = true; }
     return changed ? u.href : raw;
   }
-  const api = { READ, INTERACT, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
+  const api = { READ, INTERACT, UNADDRESSED, defaults, normalizeHost, normalizePolicy, matches, check, validate, redactUrl };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.MyBrowserPolicy = api;
 })(globalThis);

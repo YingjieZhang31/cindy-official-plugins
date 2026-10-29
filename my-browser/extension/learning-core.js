@@ -15,6 +15,13 @@
   const codes='aa ab ae af ak am an ar as av ay az ba be bg bh bi bm bn bo br bs ca ce ch co cr cs cu cv cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt my na nb nd ne ng nl nn no nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo wa wo xh yi yo za zu'.split(' ');
   for(const code of codes)if(!languages[code]){try{languages[code]=new Intl.DisplayNames([code],{type:'language'}).of(code);}catch{languages[code]=code;}}
   function validTarget(value){return typeof value==='string'&&((Object.hasOwn(languages,value)&&value!=='auto')||/^custom:[\p{L}\p{M}][\p{L}\p{M}\p{N} ()’'·-]{0,79}$/u.test(value));}
+  // Same primary language tag (zh-Hans / zh-CN / zh) means the captions already match the target.
+  // YouTube's own translation track (tlang) names Chinese by script; custom names have no track.
+  function youtubeTranslationLanguage(target){if(typeof target!=='string'||target.startsWith('custom:'))return null;const map={'zh-CN':'zh-Hans','zh-SG':'zh-Hans','zh-TW':'zh-Hant','zh-HK':'zh-Hant','zh':'zh-Hans'};if(map[target])return map[target];return /^[a-z]{2,3}(?:-[A-Za-z]{2,8})?$/.test(target)?target:null;}
+  // After the look-ahead window is satisfied, keep going: next passage after the playhead first, then anything earlier.
+  // `ahead` caps how far past the playhead background work reaches (seconds); earlier passages are always eligible.
+  function backgroundSubtitleChunk(chunks,time,now=Date.now(),ahead=Infinity){const open=(chunks||[]).filter(c=>!c.done&&!c.error&&!c.busy&&!(c.retryAt>now)).sort((a,b)=>a.words[0].start-b.words[0].start);return open.find(c=>c.words.at(-1).end>time&&c.words[0].start<=time+ahead)||open.find(c=>c.words.at(-1).end<=time)||null;}
+  function sameLanguage(a,b){const base=v=>typeof v==='string'&&!v.startsWith('custom:')?v.toLowerCase().split(/[-_]/)[0]:'';const x=base(a),y=base(b);return !!x&&x===y;}
   function languageName(value){return Object.hasOwn(languages,value)?languages[value]:validTarget(value)?value.slice(7):'';}
   const operations = new Set(['translate','explain','summary','conversation','save','list','remove','review','import','preferences','config','task','subtitles','subtitle-document','subtitle-cache-clear']);
   function string(value,max,required=false) {
@@ -54,6 +61,19 @@
       out.words=input.words.map((w,i)=>{const text=string(w.text,500,true);if(!Number.isFinite(w.start)||!Number.isFinite(w.end)||w.start<0||w.end<=w.start||w.end>864000||(i&&w.start<input.words[i-1].end-.001))throw Error('INVALID_TIME');return {text,start:w.start,end:w.end,breakBefore:w.breakBefore===true};});
       if(out.words.map(w=>w.text).join('').length>12000)throw Error('BATCH_TOO_LARGE');
       if(input.nextStart!==undefined){if(!Number.isFinite(input.nextStart)||input.nextStart<out.words.at(-1).end||input.nextStart>864000)throw Error('INVALID_TIME');out.nextStart=input.nextStart;}
+      // Earlier captions of the same video already translated: a reference for names and terms
+      // when a fresh task starts mid-video. Malformed items are dropped, never rejected.
+      if(out.editorial&&Array.isArray(input.reference)){
+        const items=input.reference.filter(r=>r&&typeof r.text==='string'&&typeof r.translation==='string'&&r.text.trim()&&r.translation.trim()).slice(-12).map(r=>({text:r.text.trim().slice(0,300),translation:r.translation.trim().slice(0,300)}));
+        while(items.length&&JSON.stringify(items).length>2000)items.shift();
+        if(items.length)out.reference=items;
+      }
+    }
+    // The tab a page request came from, set by the extension's worker (never by the page). It only
+    // keeps two tabs' videos apart; it is not shown to the model.
+    if (input.view!==undefined) {
+      if (typeof input.view!=='string' || !/^[A-Za-z0-9:_-]{1,64}$/.test(input.view)) throw Error('INVALID_INPUT');
+      out.view=input.view;
     }
     if (input.id!==undefined) out.id=string(input.id,100,true);
     if (['remove','review','task'].includes(out.op) && !out.id) throw Error('INVALID_ID');
@@ -216,6 +236,48 @@
     }
     return subtitleSegments(words,groups,nextStart,true);
   }
+  // YouTube lists caption tracks alphabetically by language, so "the first track" is often
+  // Arabic on an English video; it may even auto-generate a track per language, so "the
+  // auto-generated track" is ambiguous too. The spoken language is what the video's default
+  // audio track points at as its default caption (that index is the only authoritative
+  // signal), else the single auto-generated track. Prefer a manual track in that language,
+  // then the auto-generated one in it.
+  // hints.audioLanguage: the language of the video's default (original) audio track;
+  // hints.current: the caption track the player is showing right now. Both stand in when the
+  // default caption index is missing, which happens on signed-in pages.
+  function youtubeCaptionTrack(tracks,wanted,defaultIndex,hints={}) {
+    const list=Array.isArray(tracks)?tracks.filter(t=>t&&typeof t.language==='string'):[];
+    if(!list.length)return undefined;
+    const base=code=>String(code||'').toLowerCase().split(/[-_]/)[0];
+    if(wanted&&wanted!=='auto'){const exact=list.find(t=>t.language===wanted)||list.find(t=>base(t.language)===base(wanted));if(exact)return exact;}
+    const auto=list.filter(t=>t.kind==='asr');
+    const preset=Number.isInteger(defaultIndex)&&list.includes(tracks[defaultIndex])?tracks[defaultIndex]:undefined;
+    const current=hints?.current?.language?list.find(t=>t.language===hints.current.language&&(t.kind||null)===(hints.current.kind||null)):undefined;
+    const spoken=base(preset?.language||hints?.audioLanguage||(auto.length===1?auto[0].language:'')||current?.language);
+    if(spoken){
+      const manual=list.find(t=>t.kind!=='asr'&&base(t.language)===spoken);if(manual)return manual;
+      const generated=auto.find(t=>base(t.language)===spoken);if(generated)return generated;
+    }
+    return preset||(auto.length===1?auto[0]:undefined)||current||list.find(t=>t.kind!=='asr')||list[0];
+  }
+  // A caption source can hand back another language than the track asked for (a remembered
+  // caption choice, a transcript panel following the account). Compare writing systems only:
+  // reliable enough to catch Arabic for English, and silent when either side is unknown.
+  const SCRIPTS=[['arabic',/[\u0600-\u06ff\u0750-\u077f]/g],['hebrew',/[\u0590-\u05ff]/g],['cyrillic',/[\u0400-\u04ff]/g],['greek',/[\u0370-\u03ff]/g],['devanagari',/[\u0900-\u097f]/g],['bengali',/[\u0980-\u09ff]/g],['gurmukhi',/[\u0a00-\u0a7f]/g],['tamil',/[\u0b80-\u0bff]/g],['telugu',/[\u0c00-\u0c7f]/g],['malayalam',/[\u0d00-\u0d7f]/g],['thai',/[\u0e00-\u0e7f]/g],['hangul',/[\uac00-\ud7af\u1100-\u11ff]/g],['kana',/[\u3040-\u30ff]/g],['han',/[\u4e00-\u9fff]/g],['latin',/[A-Za-z\u00c0-\u024f]/g]];
+  // Serbian and Kazakh are written in both Cyrillic and Latin script; either one matches.
+  const LANGUAGE_SCRIPTS={ar:'arabic',fa:'arabic',ur:'arabic',ps:'arabic',iw:'hebrew',he:'hebrew',yi:'hebrew',ru:'cyrillic',uk:'cyrillic',bg:'cyrillic',sr:['cyrillic','latin'],mk:'cyrillic',be:'cyrillic',kk:['cyrillic','latin'],mn:'cyrillic',el:'greek',hi:'devanagari',mr:'devanagari',ne:'devanagari',bn:'bengali',pa:'gurmukhi',ta:'tamil',te:'telugu',ml:'malayalam',th:'thai',ko:'hangul',ja:'kana',zh:'han',en:'latin',fr:'latin',de:'latin',es:'latin',pt:'latin',it:'latin',nl:'latin',pl:'latin',id:'latin',ms:'latin',vi:'latin',tr:'latin',sv:'latin',da:'latin',no:'latin',fi:'latin',cs:'latin',ro:'latin',hu:'latin',tl:'latin',fil:'latin'};
+  function dominantScript(cues) {
+    const sample=(cues||[]).slice(0,60).map(c=>c.text||'').join(' ');const counts={};
+    for(const [name,re] of SCRIPTS)counts[name]=(sample.match(re)||[]).length;
+    if(counts.kana)counts.kana+=counts.han; // Japanese mixes kana with kanji
+    const [best,n]=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]||[];
+    return n>=20?best:null;
+  }
+  function captionsMatchLanguage(cues,language) {
+    const expected=[].concat(LANGUAGE_SCRIPTS[String(language||'').toLowerCase().split(/[-_]/)[0]]||[]);
+    const actual=dominantScript(cues);
+    return !expected.length||!actual||expected.includes(actual);
+  }
   function subtitleDocument(cues) {
     const paragraphs=[];let text=[],translation=[];
     const flush=()=>{if(text.length)paragraphs.push({text:joinWords(text.map(text=>({text}))),translation:joinWords(translation.map(text=>({text})))});text=[];translation=[];};
@@ -266,7 +328,7 @@
     return {...entry,interval:days,due:now+(days?days*86400000:600000),reviews:(entry.reviews||0)+1,updated:now};
   }
   function uuid(){if(globalThis.crypto.randomUUID)return globalThis.crypto.randomUUID();const bytes=globalThis.crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;return Array.from(bytes,(v,i)=>([4,6,8,10].includes(i)?'-':'')+v.toString(16).padStart(2,'0')).join('');}
-  const api={learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
+  const api={captionsMatchLanguage,youtubeCaptionTrack,youtubeTranslationLanguage,backgroundSubtitleChunk,sameLanguage,learningTiming,learningRequestTimeout,uuid,languages,commonLanguages,validTarget,languageName,validate,parseSubtitles,exportSubtitles,schedule,source,joinWords,youtubeSubtitles,subtitleWords,subtitleChunks,subtitleSegments,splitSubtitleChunk,cleanSubtitleText,subtitleTurns,alignSubtitleTurn,subtitleDocument,subtitleBuffer,pendingSubtitleChunks,subtitlePreparation};
   if(typeof module==='object'&&module.exports)module.exports=api;
   root.CindyLearning=api;
 })(globalThis);

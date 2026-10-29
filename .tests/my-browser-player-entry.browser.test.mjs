@@ -33,7 +33,7 @@ test('automatic video entries stay inside adapted controls',{
           onChanged:{addListener(){},removeListener(){}}}};
     },brandURL);
     const bounds=await page.locator('video').boundingBox();
-    for(const file of ['learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
+    for(const file of ['brand-icon.js','learning-core.js','subtitle-playback.js','ui.js','reading-ui.js','content.js'])
       await page.addScriptTag({path:path.join(extension,file)});
     return {page,bounds};
   }
@@ -102,6 +102,22 @@ test('automatic video entries stay inside adapted controls',{
       document.dispatchEvent(new Event('yt-navigate-finish'));
     });
     assert.equal(await page.locator('[data-cindy-player-entry]').count(),0);
+  });
+
+  await t.test('a running subtitle session owns the control bar; late navigation events add no entry',async()=>{
+    const {page}=await fixture('<div id="movie_player" class="player"><video></video><div class="ytp-right-controls"></div></div>');
+    assert.equal(await page.locator('[data-cindy-player-entry]').count(),1);
+    const opened=await page.evaluate(()=>new Promise(resolve=>command({type:'cindy-ui',action:'video'},{id:'fixture'},resolve)));
+    assert.equal(opened.ok,true);
+    await page.locator('[data-cindy-captions]').waitFor();
+    assert.equal(await page.locator('.ytp-right-controls > [data-cindy-player-control]').count(),1);
+    assert.equal(await page.locator('[data-cindy-player-entry]').count(),0,'mounting captions removes the entry');
+    // YouTube fires yt-navigate-finish after an auto-started session is already running.
+    await page.evaluate(()=>{for(let i=0;i<3;i++)document.dispatchEvent(new Event('yt-navigate-finish'));});
+    await page.waitForTimeout(1200);
+    assert.equal(await page.locator('[data-cindy-player-entry]').count(),0,'no second Cindy icon beside the session toggle');
+    assert.equal(await page.locator('.ytp-right-controls > [data-cindy-player-control]').count(),1);
+    await screenshot(page,'session-single-icon');
   });
 
   await t.test('extension invalidation removes its player entry',async()=>{

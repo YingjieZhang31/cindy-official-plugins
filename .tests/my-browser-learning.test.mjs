@@ -66,7 +66,7 @@ test('subtitle import keeps timing, strips markup and preserves literal comparis
   assert.throws(()=>core.validate({op:'save',text:'x',source:{url:'javascript:alert(1)'}}));
   assert.throws(()=>core.validate({op:'translate',texts:Array(25).fill('x')}));
 });
-test('learning requests are authenticated, deduplicated, cancellable and revoked with site policy',async t=>{
+test('learning requests are authenticated, deduplicated and cancellable',async t=>{
   const notices=[],bridge=createBridge({ports:[0],notify:(method,params)=>notices.push({method,params})});t.after(()=>bridge.close());
   const {port}=await bridge.request('status'),id=crypto.randomUUID();let session;
   const baseHeaders={'X-My-Browser-Extension':EXT_ID,'X-My-Browser-Client':id,'X-My-Browser-Version':version};
@@ -101,9 +101,6 @@ test('learning requests are authenticated, deduplicated, cancellable and revoked
   assert.equal(progress.stage,'model');assert.equal(progress.attempt,2);assert.equal(progress.prompt,undefined);
   await bridge.request('learningProgress',{id:job.id,progress:{stage:'untrusted arbitrary text'}});
   assert.equal((await signed('/learning/result',{id:job.id})).progress.stage,'model');
-  await bridge.request('setPolicy',{policy:{read:{block:['example.test']},interact:{allow:[]}}});
-  assert.equal((await bridge.request('learningActive',{id:job.id})).active,false);
-  assert.equal((await signed('/learning/result',{id:job.id})).status,403);
   const config={id:crypto.randomUUID(),request:{op:'config'}};await signed('/learning/start',config);await signed('/learning/cancel',{id:config.id});
   assert.equal((await bridge.request('learningResult',{id:config.id,result:{ok:true}})).ok,false);
 });
@@ -168,13 +165,16 @@ test('model failures retain their code and do not falsely diagnose a disconnecte
     const s=createLearningService({core,model:async()=>({ok:false,errorCode:code}),library:async()=>({ok:true})});
     await assert.rejects(s.handle(crypto.randomUUID(),{op:'translate',text:'Hello',target:'en'}),e=>{
       assert.equal(e.message,code);
-      for(const locale of ['zh-CN','en']){const message=ui.error(e.message,locale);assert.ok(message.endsWith('('+code+')'));assert.doesNotMatch(message,/检查.*连接|Check.*connection/i);}
+      // The sentence a person reads carries no code; the code stays available as a separate detail.
+      assert.equal(ui.errorDetail(e.message),code);
+      for(const locale of ['zh-CN','en']){const message=ui.error(e.message,locale);assert.doesNotMatch(message,/\(([A-Z_]+)\)$/);assert.doesNotMatch(message,/检查.*连接|Check.*connection/i);}
       return true;
     });
   }
-  assert.match(ui.error('SOME_NEW_FAILURE','zh-CN'),/尚无法确定具体原因.*SOME_NEW_FAILURE/);
+  assert.match(ui.error('SOME_NEW_FAILURE','zh-CN'),/尚无法确定具体原因/);assert.equal(ui.errorDetail('SOME_NEW_FAILURE'),'SOME_NEW_FAILURE');
   assert.doesNotMatch(ui.error('Error: token=private-value https:\/\/example.test','zh-CN'),/private-value|example.test/);
-  assert.match(ui.error('Error: token=private-value','zh-CN'),/UNKNOWN_ERROR/);
+  assert.doesNotMatch(ui.errorDetail('Error: token=private-value https:\/\/example.test'),/private-value|example.test/);
+  assert.equal(ui.errorDetail('Error: token=private-value'),'UNKNOWN_ERROR');
   for(const code of ['PAIRING_REQUIRED','SESSION_CHANGED'])for(const locale of ['en','zh-CN']) {
     const message=ui.error(code,locale).replace(' ('+code+')','');assert.doesNotMatch(message,/confirm|pairing|配对|确认此浏览器/i);assert.match(message,/automatically|自动重连/);
   }
@@ -239,7 +239,8 @@ test('subtitle cache survives service restart, isolates language and transcript,
  await service.handle(client,{...req,words:[{text:'Changed.',start:0,end:2}]});assert.equal(modelCalls,3);
  await service.handle(client,{op:'subtitle-cache-clear',target:req.target,source:req.source});
  await service.handle(client,req);assert.equal(modelCalls,4);
- await service.handle(crypto.randomUUID(),req);assert.equal(modelCalls,5);
+ // Another browser profile watching the same video reuses the shared cache instead of translating again.
+ await service.handle(crypto.randomUUID(),req);assert.equal(modelCalls,4);
 });
 test('subtitle cache failure preserves translation and corrupted cache data is never overwritten',async()=>{
  const req={op:'subtitles',editorial:true,source:{url:'https://example.test/video'},words:[{text:'Hello.',start:0,end:1}]};
@@ -320,7 +321,125 @@ test('bridge keeps a slow prefetched subtitle request active for the shared requ
 test('document errors show a bounded reason without echoing arbitrary exception data',()=>{
   const context={};vm.runInNewContext(fs.readFileSync(new URL('../my-browser/extension/ui.js',import.meta.url),'utf8'),context);
   for(const locale of ['en','zh-CN']){
-    assert.match(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'DOCUMENT_UNAVAILABLE'),/DOCUMENT_UNAVAILABLE/);
+    assert.match(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'DOCUMENT_UNAVAILABLE'),/document|文档/i);
+    assert.equal(context.CindyUI.errorDetail('ADDRESS_UNVERIFIED','DOCUMENT_UNAVAILABLE'),'ADDRESS_UNVERIFIED / DOCUMENT_UNAVAILABLE');
     assert.doesNotMatch(context.CindyUI.error('ADDRESS_UNVERIFIED',locale,'token=secret'),/token=secret/);
+    assert.doesNotMatch(context.CindyUI.errorDetail('ADDRESS_UNVERIFIED','token=secret'),/token=secret/);
   }
+});
+
+test('same-language detection compares primary language tags only',()=>{
+  // Automatic sessions skip the model when captions already match the target.
+  assert.equal(core.sameLanguage('en','en-US'),true);
+  assert.equal(core.sameLanguage('zh-Hans','zh-CN'),true);
+  assert.equal(core.sameLanguage('en','zh-CN'),false);
+  assert.equal(core.sameLanguage(undefined,'zh-CN'),false);
+  assert.equal(core.sameLanguage('zh','custom:中文'),false);
+});
+
+test('subtitle cache paths satisfy the host library path rule',async()=>{
+  // Bug regression: the cache file name was a full SHA-256 + ".json" (69 chars); the host rejects
+  // segments over 64 characters with PATH_INVALID, so no subtitle translation was ever cached.
+  const {createSubtitleCache}=await import('../my-browser/subtitle-cache.js');
+  const paths=[];
+  const cache=createSubtitleCache({core,library:async r=>{if(r.path)paths.push(r.path);return r.op==='read'?{ok:false,errorCode:'NOT_FOUND'}:{ok:true};}});
+  await cache.open('d188826c-c250-4cf0-84e9-a64409dd5204',{source:{url:'https://www.youtube.com/watch?v=GoE7NbnBllE'},target:'zh-CN'});
+  assert.ok(paths.length>0);
+  const segment=/^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,63}$/;
+  for(const p of paths)for(const seg of p.split('/'))assert.match(seg,segment,p);
+  // The file is keyed by video and target language only; a second browser profile reads the same file.
+  const other=createSubtitleCache({core,library:async r=>{if(r.path)paths.push(r.path);return r.op==='read'?{ok:false,errorCode:'NOT_FOUND'}:{ok:true};}});
+  await other.open('another-client',{source:{url:'https://m.youtube.com/watch?v=GoE7NbnBllE&t=5s'},target:'zh-CN'});
+  assert.equal(new Set(paths).size,1,paths.join(' '));
+});
+
+test('YouTube translation language maps Chinese targets to script tags and rejects custom names',()=>{
+  assert.equal(core.youtubeTranslationLanguage('zh-CN'),'zh-Hans');
+  assert.equal(core.youtubeTranslationLanguage('zh-TW'),'zh-Hant');
+  assert.equal(core.youtubeTranslationLanguage('ja'),'ja');
+  assert.equal(core.youtubeTranslationLanguage('pt-BR'),'pt-BR');
+  assert.equal(core.youtubeTranslationLanguage('custom:Klingon'),null);
+  assert.equal(core.youtubeTranslationLanguage('x y'),null);
+});
+test('background fill picks the next open passage after the playhead, then earlier ones',()=>{
+  const chunk=(start,end,extra={})=>({words:[{start,end:start+1},{start:end-1,end}],...extra});
+  const chunks=[chunk(0,30,{done:true}),chunk(30,60),chunk(60,90,{busy:true}),chunk(90,120),chunk(120,150,{error:'X'})];
+  assert.equal(core.backgroundSubtitleChunk(chunks,70),chunks[3]);
+  assert.equal(core.backgroundSubtitleChunk(chunks,200),chunks[1],'nothing ahead: earlier open passage');
+  // The cap keeps background work within reach of the playhead; earlier passages stay eligible.
+  assert.equal(core.backgroundSubtitleChunk(chunks,70,Date.now(),10),chunks[1],'beyond the cap: fall back to an earlier passage');
+  assert.equal(core.backgroundSubtitleChunk(chunks,70,Date.now(),30),chunks[3]);
+  assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[3]],10,Date.now(),5),null,'nothing within reach and nothing earlier');
+  assert.equal(core.backgroundSubtitleChunk([chunks[0],chunks[4]],10),null);
+});
+
+test('youtubeCaptionTrack picks the spoken language, not the alphabetically first track',()=>{
+  // Bug regression (2026-10-28): English videos were read as Arabic because "ar" sorts first.
+  const t=(language,kind)=>({url:'u',language,...(kind?{kind}:{})});
+  const tracks=[t('ar'),t('de'),t('en'),t('en','asr'),t('fr')];
+  assert.equal(core.youtubeCaptionTrack(tracks,'auto'),tracks[2],'manual track in the asr language wins');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('en','asr')],'auto').language,'en','asr itself when no manual track matches');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('en-GB')],'auto',1).language,'en-GB','default caption index decides without an asr track');
+  assert.equal(core.youtubeCaptionTrack(tracks,'de').language,'de','an explicit language is honoured');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),t('de')],'auto').language,'ar','no signal keeps the first manual track');
+  assert.equal(core.youtubeCaptionTrack([],'auto'),undefined);
+  // Bug regression (2026-10-28, watch?v=3pfnSu6HLB8): YouTube auto-generated a track per language, Arabic first;
+  // "the auto-generated track" picked Arabic. The default audio track's default caption (index 3, English) decides.
+  const generated=["ar", "bn", "nl", "en", "de", "iw", "hi", "id", "it", "ja", "ko", "ml", "pl", "pt", "pa", "ru", "es", "ta", "te", "uk"].map(l=>t(l,'asr'));
+  assert.equal(core.youtubeCaptionTrack(generated,'auto',3).language,'en');
+  assert.equal(core.youtubeCaptionTrack([t('ar'),...generated],'auto',4).language,'en','manual track in the spoken language is still preferred when it exists');
+  assert.equal(core.youtubeCaptionTrack([t('en'),...generated],'auto',4).language,'en');
+  assert.equal(core.youtubeCaptionTrack(generated,'auto').language,'ar','without the default caption signal nothing better than the first track is known');
+});
+
+test('subtitle requests accept a bounded reference of earlier translated captions',()=>{
+  const words=[{text:'Hi.',start:0,end:1}];
+  const ok=core.validate({op:'subtitles',editorial:true,words,reference:[...Array(20)].map((_,i)=>({text:'line '+i,translation:'译文 '+i})).concat([{text:'',translation:'x'},{bad:1}])});
+  assert.equal(ok.reference.length,12);assert.equal(ok.reference.at(-1).text,'line 19');
+  const long=core.validate({op:'subtitles',editorial:true,words,reference:[...Array(12)].map(()=>({text:'x'.repeat(300),translation:'y'.repeat(300)}))});
+  assert.ok(JSON.stringify(long.reference).length<=2000);
+  assert.equal(core.validate({op:'subtitles',words,reference:[{text:'a',translation:'b'}]}).reference,undefined,'only the editorial path uses it');
+});
+
+test('captionsMatchLanguage compares writing systems and stays silent when unsure',()=>{
+  // Bug regression (2026-10-28, watch?v=OVwWsdZ-fg8): an Arabic transcript was translated as the English track.
+  const cue=text=>({text});
+  const arabic=[cue('٨٠ ٪ ، هذه هي النتيجة التي حصل عليها مرطبان مايونيز من وولورثز هذا الشهر')];
+  const english=[cue("80%. That's the score a Woolworth's jar of mayonnaise got this month from Choice")];
+  assert.equal(core.captionsMatchLanguage(arabic,'en'),false);
+  assert.equal(core.captionsMatchLanguage(english,'en'),true);
+  assert.equal(core.captionsMatchLanguage(arabic,'ar'),true);
+  assert.equal(core.captionsMatchLanguage([cue('これはテストです。日本語の字幕を確認しています。')],'ja'),true);
+  assert.equal(core.captionsMatchLanguage([cue('这是一个测试，用来确认中文字幕的语言判断是否正确。')],'zh-Hans'),true);
+  assert.equal(core.captionsMatchLanguage([cue('[Music]')],'en'),true,'too little text decides nothing');
+  assert.equal(core.captionsMatchLanguage(english,'xx'),true,'unknown languages are not judged');
+  // Serbian and Kazakh subtitles come in either script; Latin-script tracks were refused as a mismatch.
+  const serbianLatin=[cue('Dobro veče, ovo je test da proverimo da li se titlovi na srpskom latinici prihvataju.')];
+  const serbianCyrillic=[cue('Добро вече, ово је тест да проверимо да ли се титлови на српском ћирилици прихватају.')];
+  const kazakhLatin=[cue('Bul synaq: qazaq tilindegi latyn jazuyndagy subtitrler qabyldanuy kerek.')];
+  for(const [cues,language] of [[serbianLatin,'sr'],[serbianCyrillic,'sr'],[serbianLatin,'sr-Latn'],[kazakhLatin,'kk'],[serbianCyrillic,'kk']])assert.equal(core.captionsMatchLanguage(cues,language),true,language);
+  assert.equal(core.captionsMatchLanguage(arabic,'sr'),false);
+  assert.equal(core.captionsMatchLanguage(serbianCyrillic,'en'),false);
+});
+
+test('youtubeCaptionTrack: Chinese-ordered list with English last, and pages without the default caption index',()=>{
+  // Bug regression (2026-10-28, watch?v=JjbWhEVfOvA, zh-CN UI): English was the 21st track and the reader kept only 20,
+  // so the default caption index pointed past the list and the first track, Arabic, was chosen.
+  const t=(language,kind)=>({url:'u',language,...(kind?{kind}:{})});
+  const zh=["ar", "pl", "de-DE", "ru", "fr-FR", "ko", "nl-NL", "ml", "bn", "pa", "pt-BR", "ja", "te", "ta", "uk", "es-US", "iw", "it", "hi", "id", "en"].map(l=>t(l,'asr'));
+  assert.equal(zh.length,21);assert.equal(core.youtubeCaptionTrack(zh,'auto',20).language,'en');
+  // No default caption index: the original audio's language decides, then the track the player shows.
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',undefined,{audioLanguage:'en-US'}).language,'en');
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',undefined,{current:{language:'en',kind:'asr'}}).language,'en');
+  assert.equal(core.youtubeCaptionTrack(zh,'auto',20,{current:{language:'ar',kind:'asr'}}).language,'en','a remembered caption choice never beats the default index');
+});
+
+test('Chinese variants are named by script, never by region',()=>{
+  // Product rule (2026-10-28): the browser's own names "中文（中国）/中文（台湾）" must not appear.
+  const ctx={Intl};ctx.globalThis=ctx;ctx.CindyLearning=core;vm.createContext(ctx);
+  for(const file of ['ui.js','reading-ui.js'])vm.runInContext(fs.readFileSync(new URL('../my-browser/extension/'+file,import.meta.url),'utf8'),ctx);
+  const name=(code,locale)=>ctx.CindyUI.languageDisplayName(new Intl.DisplayNames([locale],{type:'language'}),code,core.languages[code],locale);
+  assert.equal(name('zh-CN','zh-CN'),'简体中文');assert.equal(name('zh-TW','zh-CN'),'繁体中文');
+  assert.equal(name('zh-CN','en'),'Simplified Chinese');assert.equal(name('zh-TW','en'),'Traditional Chinese');
+  for(const code of core.commonLanguages)assert.doesNotMatch(name(code,'zh-CN'),/中国|台湾|台灣/,code);
 });

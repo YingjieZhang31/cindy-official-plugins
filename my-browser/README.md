@@ -51,12 +51,12 @@ Installation cards appear only for connected browsers or installed browsers with
 
 ## Security and limitations
 
-- New installations allow reading and interaction on all public websites. Saved restrictions are preserved until explicitly removed in settings: old policies lack provenance, so matching the legacy preset does not prove user intent; the all-sites switch enables broad interaction, while read blocks and interaction exclusions still take precedence. Domain grants include subdomains; `=host.example.test` is exact-only. New grants/unblocking require real confirmation; cancellation changes nothing.
-- Loopback only. New official profiles register their public key through Native Messaging before the signed handshake grants a session. Self-reported extension ID/Origin over HTTP is insufficient. The native executable checks its browser caller (macOS signature, Windows Authenticode, or Linux root-owned supported installation), then uses a private per-user bootstrap credential; that credential never reaches the browser, logs or Cindy KV. Existing saved bindings remain usable without reapproval. Site policy, single-use signatures, session binding and no CORS remain. This does not protect an OS account/browser already controlled by malware or an attacker able to read/alter its private credential files.
+- No site lists: the agent can read and act on any website, including local and intranet pages, like Cindy's own browser. Safety is the task's permission mode and review in Cindy (since 0.4.54 / host package 0.4.75; restrictions saved by older versions no longer apply).
+- Loopback only. New official profiles register their public key through Native Messaging before the signed handshake grants a session. Self-reported extension ID/Origin over HTTP is insufficient. The native executable checks its browser caller (macOS signature, Windows Authenticode, or Linux root-owned supported installation), then uses a private per-user bootstrap credential; that credential never reaches the browser, logs or Cindy KV. Existing saved bindings remain usable without reapproval. Single-use signatures, session binding and no CORS remain. This does not protect an OS account/browser already controlled by malware or an attacker able to read/alter its private credential files.
 - Jobs and acknowledgments/results are bound to one profile. Delivered actions are never replayed. `execution:executed` proves DOM dispatch, not successful sending/purchase; `unknown` requires checking before repetition.
-- No cookie export, arbitrary JS tool, debugger or credential extraction. Hidden/password/payment-code fields are excluded, but arbitrary page text may still contain private information. AI may receive this data off-device. Visits/reads contact websites and may affect server-side notification read state.
-- Page access follows the browser’s current document identity and the saved site policy. Proxy endpoints, missing peer IPs, cache hits and restored tabs no longer block normal reading or translation. Local/private IP URLs, Chrome-protected pages, and hostnames that the browser’s DNS reports as private/loopback/link-local/ULA remain denied. Public IPv6 literals are allowed. Connection-peer IP is not used: a local proxy’s address is not the website. When DNS is unavailable or fails (typical of system/remote-DNS proxies), that hostname is not treated as private. No proxy permissions or settings changes are required. The extension targets the exact current `documentId`; no cookie/header capture.
-- At most three background tabs per profile, reclaimed after ten idle minutes. User-owned/focused/navigated tabs are not reclaimed. Safari without session storage keeps the ownership ledger in memory rather than persisting tab ids across browser restarts.
+- The plugin has no cookie-export or credential-extraction feature of its own, and sets no limits on the agent beyond Cindy's task permissions and review (since 0.4.57: password, payment and one-time-code fields work like any field; hidden inputs stay out of reads). Cindy's `browser` tool with extension 0.4.43 or later can run page scripts (`evaluate`), so arbitrary page content, including private information, may reach the agent. Chrome's debugger is an optional permission that stays off until you allow it; once allowed, recipes can read the site's cookies through it. AI may receive this data off-device. Visits/reads contact websites and may affect server-side notification read state.
+- Page access follows the browser’s current document identity. Proxy endpoints, missing peer IPs, cache hits and restored tabs no longer block normal reading or translation. For translation and subtitles, local/private IP URLs, Chrome-protected pages, and hostnames that the browser’s DNS reports as private/loopback/link-local/ULA remain denied; agent jobs from Cindy's `browser` tool may reach local and private pages, like Cindy's dedicated browser. Public IPv6 literals are allowed. Connection-peer IP is not used: a local proxy’s address is not the website. When DNS is unavailable or fails (typical of system/remote-DNS proxies), that hostname is not treated as private. No proxy permissions or settings changes are required. The extension targets the exact current `documentId`; no cookie/header capture.
+- Pages the agent opens go to a separate, unfocused Cindy window. There is no fixed tab limit; tabs the agent opened are reclaimed after ten idle minutes. User-owned/focused/navigated tabs are not reclaimed. Safari without session storage keeps the ownership ledger in memory rather than persisting tab ids across browser restarts.
 - Refs are isolated-world Element maps, not page-writable attributes, and expire on navigation/new snapshots. Synthetic keys/hover may be ignored. No cross-origin frames or closed Shadow DOM. Form submission uses one mechanism only.
 - Text/record values default to a 6000-character budget; JSON/link overhead is additional. Tabs default to 20, max 100, with an additional aggregate budget. Overlong tab URLs are not exported. A timeout/empty shell is not proof of no results.
 
@@ -272,7 +272,7 @@ Verification uses isolated Chromium with the actual extension, bridge, PDF and O
 
 A compact in-player progress card reports the completed share of source words, completed passages, prepared coverage ahead, active video range, elapsed stage time and processing stage. Cache reads, queueing, waiting for previous model requests, model response, timeline validation and cache writes have distinct states. Elapsed time never invents model-generation percentages. Finished progress follows the player controls; errors keep their stage and retry action visible.
 
-Validated bilingual captions are cached incrementally in the declared plugin Library at `browser/<client-id>/subtitles/<hash>.json`, isolated by browser profile, video and target language. Reopening a video or restarting the plugin can reuse it; changed source text or timing misses the cache. Each file is limited to 8 MB. Unavailable, corrupt or full storage keeps the current translation with an explicit persistence warning; corrupt files are not automatically overwritten. Internal files are JSON, and existing SRT export remains available. More → Clear this video's cache and translate again clears the current video and target language, for example after choosing another model. Already-running writes cannot restore entries from before that clear.
+Validated bilingual captions are cached incrementally in the declared plugin Library at `browser/subtitles/<hash>.json`, keyed by video and target language; browser profiles share them. Reopening a video or restarting the plugin can reuse it; changed source text or timing misses the cache. Each file is limited to 8 MB. Unavailable, corrupt or full storage keeps the current translation with an explicit persistence warning; corrupt files are not automatically overwritten. Internal files are JSON, and existing SRT export remains available. More → Clear this video's cache and translate again clears the current video and target language, for example after choosing another model. Already-running writes cannot restore entries from before that clear.
 
 The former background short-text path could not cancel a dispatched request. It has been replaced by the ordinary task execution path described below.
 
@@ -340,3 +340,212 @@ Allowed-site tab failures stay visible as redacted diagnostic rows. Page loading
 ## 0.4.23 toolbar badge recovery (host package 0.4.36)
 
 A failed panel-open click now marks only the affected tab. Opening the panel successfully, refreshing or navigating clears that document's warning and restores the shared connection badge. A disconnected Cindy still shows its warning; page recovery does not pretend to reconnect it. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.
+
+## Host-owned bridge (host package 0.4.37)
+
+Cindy hosts that implement the `browserExtension` plugin capability now own the extension bridge: pairing, native binding, job dispatch, site-policy enforcement, result redaction and the learning relay (translation, subtitles) all run in Cindy, and the bundled worker no longer binds a loopback port on those hosts. The signed wire protocol stays `0.4.13` / protocol 3, so installed extensions keep connecting without an update, and `/health` still reports `plugin: "my-browser"`. On those hosts the extension also becomes the "My browser" target of Cindy's `browser` tool: the agent can read and operate the pages you are using, within the same site permissions this plugin keeps. Older hosts reject the pipe type and the bundled worker bridge keeps serving exactly as before; a refusal is never reported as a connection. Permissions of the extension are unchanged.
+
+## 0.4.24 YouTube captions through the player's own request (host package 0.4.37)
+
+YouTube's timedtext endpoint now answers an extension's direct request with an empty 200 unless the page player's proof-of-origin token is attached, so the reader reported `SUBTITLE_EMPTY` on videos that clearly have captions. When the direct read is empty, the extension now asks the player for the wanted track inside the verified video document, reads the URL of the request the player makes itself, fetches that same-origin URL with `fmt=json3` and no cookies, and restores the player's caption state. The transcript-panel fallback also recognises the newer "In this video" panel, which carries no `target-id`. No new permissions; the request stays on youtube.com and the signed wire protocol is unchanged.
+
+## 0.4.47 the agent can do in your browser what it does in Cindy's dedicated one (host package 0.4.67)
+
+Which browser the agent uses is your choice, so "My browser" now offers the same actions as Cindy's dedicated browser: screenshots, file upload, page scripts (`evaluate`), console messages, network requests and response bodies, answering the page's next alert/confirm/prompt, switching and closing tabs, waiting for text, URLs or load states, coordinate, double, right and modified clicks, drag and drop, and resizing. What it must not do is disturb your own browsing: pages the agent opens go to a separate Cindy window that never takes focus, a screenshot never switches the tab you are looking at, and only Cindy's window can be resized. Jobs address tabs by id, so a tab that navigates keeps working. Agent jobs may reach local and private pages, as in the dedicated browser; translation and subtitles keep their local-address guard.
+
+Differences that remain: pointer and keyboard input are synthetic, so a site that insists on trusted input may ignore it; a page whose Content Security Policy forbids scripts refuses `evaluate`; console capture starts at the first call; requests come from the page's resource timing; an alert that is already open must be answered by you.
+
+A few actions need Chrome's debugger: PDF export, full-page and element screenshots, capturing a background tab in one of your windows without switching to it, and site recipes that read cookies or network requests. The debugger is an optional permission and stays off. The first time PDF or such a recipe needs it, the extension opens a page in your current window that explains it, with a Turn on button (Chrome asks you to confirm); it opens at most once every ten minutes, and the agent is told to wait for you. Once on, the debugger is attached only for the action and detached right after, so Chrome's "started debugging this browser" bar appears only for those seconds; a recipe session that goes quiet is detached after two minutes. Without it, screenshots fall back to the visible area and say so. To turn it off later, right-click the Cindy toolbar icon and choose Options.
+
+On these Cindy hosts there is one way to drive your browser: Cindy's `browser` tool with the My browser target. The plugin declares that its own `browser_status`, `browser_read`, `browser_act` and `browser_tabs` tools and their manual are replaced (`browserExtension.pageControlReplaces`), so the host hides them from the agent while it provides My browser. If the host bridge is not running, and on older Cindy hosts, the plugin's tools remain available as before.
+
+You can tell what the agent works on. A page the agent acts on, including one of your own tabs, shows a thin Cindy-red glow around the page and a small "Cindy is working on this page" label at the top until about 20 seconds after the last action (long enough to bridge the agent's thinking between steps), then fades; the Cindy toolbar icon shows an AI badge on that tab for the same time. The mark never takes clicks, sits in a closed shadow root so page reads do not see it, and is hidden while a screenshot is taken. Pages Cindy opens can also go into a red "Cindy automation" tab group in Cindy's window: tab groups add a Chrome install warning, so this is an optional permission you turn on from the extension's Options page; your own tabs are never moved.
+
+When the agent's task stops, Cindy clears the mark on the pages it worked on right away instead of letting it fade. With the debugger allowed, `evaluate` also works on pages whose Content Security Policy blocks Cindy's scripts (for example Play Console and X). A page Browser Use opened keeps a small "Opened by Cindy" label in its corner and an AI badge on the toolbar icon, across the agent's own navigation, until you act on it yourself (a real click or key press; scrolling and the agent's simulated input do not count). From then on it is your tab and is no longer closed as an idle agent tab. If you have Cindy's window open, new pages open behind the one you are on. Cindy's window is created minimized, so it never appears over your work; you can open it from the Dock or taskbar to watch. Screenshots of its pages show it unfocused just for the capture. Every browser call and every job has a time limit, so one page that stops responding can no longer stall the extension and make it look disconnected. Nothing the agent does changes what you are looking at: it never switches a tab in your windows and never brings a window to the front. When it needs you on a page in Cindy's window (to sign in or pass a check), `focus` shows that page inside Cindy's window and flashes the browser icon, and the agent tells you where to look. Cindy's window is remembered across extension updates and forgotten when the browser restarts.
+
+Permissions: `<all_urls>` is added next to the http/https host permissions because Chrome's visible-tab capture requires it, and `debugger` is optional. Chrome shows the same install warnings as before (checked with `getPermissionWarningsByManifest`), so an update does not disable the extension. Older Cindy hosts and older extensions keep the previous behaviour, and Cindy asks you to update the extension when an action needs it.
+
+## 0.4.41 player button shows Cindy (host package 0.4.58)
+
+The subtitle button in the player's control bar is no longer a box with "译" or "CC". It is Cindy's silhouette with a caption bubble, the same mark as the toolbar icon, and it works in any interface language. The bubble is white while Cindy subtitles are off and Cindy red while they are on, and it now follows the on/off switch (it used to look active after subtitles were turned off).
+
+## 0.4.40 bare toolbar icon that follows light and dark (host package 0.4.57)
+
+The toolbar icon drops the white tile and the silhouette fills the icon. It comes in two versions, near-black for light toolbars and near-white for dark ones, both with the Cindy-red earring. Open pages report the browser's appearance (`prefers-color-scheme`) to the background, which switches the icon; no permission is added. The extensions page and store keep the white-tile icon.
+
+## 0.4.39 white icon everywhere, and the learning list no longer overlaps (host package 0.4.56)
+
+The mark moves to a white rounded tile with a light border, the silhouette in near-black and the earring in Cindy red; the full red tile was too loud. Every extension icon now uses it, including the extensions page and store sizes (128 px with the store's 16 px margin). In the learning tab the subtitle list had a fixed 180 px scroll box whose items were squeezed below their text height, so entries overlapped; items keep their height now and the whole panel scrolls, so the controls above scroll away and leave room for the list.
+
+## 0.4.38 toolbar icon (host package 0.4.55)
+
+The toolbar and context-menu icon is a simplified mark instead of the full illustration, which turned into an unreadable block at 16 px. It uses the Cindy desktop menu-bar silhouette (bob haircut in profile, earring, hair strands) in near-black on Cindy red, readable on light and dark toolbars. The 16 px version drops the strands and earring and enlarges the silhouette; 24 and 32 px keep the detail, and 32 px is now declared so Retina screens no longer downscale the 48 px image. The extensions page and store keep the illustrated 48 and 128 px icons. Sources: `assets/icon-source/`.
+
+## 0.4.37 lighter caption text (host package 0.4.54)
+
+Captions used a semibold weight plus an extra outline shadow, so Chinese translations (PingFang SC Semibold on macOS) looked heavy and blurred. They now use the regular weight with a single soft drop shadow over the existing background, matching the source line.
+
+## 0.4.36 Chinese is named by script in language lists (host package 0.4.53)
+
+Language lists no longer use the browser's region-based names for Chinese ("Chinese (China)" / "Chinese (Taiwan)"); they show Simplified Chinese and Traditional Chinese.
+
+## 0.4.35 "Translate ahead" is off by default (host package 0.4.52)
+
+The background completion switch is renamed "Translate ahead" with a one-line explanation (it translates about the next 30 minutes while you watch, so skipping ahead needs no wait, at the cost of more model quota). It is now off by default and follows preference changes from other tabs; a user who switched it on keeps it on.
+
+## 0.4.34 "Wait for subtitles before playing" is off by default everywhere (host package 0.4.51)
+
+The first read of the preferences treated a missing value as off, but re-reading them (after a change in another tab or a panel reopen) treated it as on, so the option could appear switched on without the user turning it on. Both paths now default to off; an explicit choice is kept.
+
+## 0.4.33 subtitle language as a second-level page (host package 0.4.50)
+
+The subtitle language is a row showing the current choice; it opens a full page with search, the common languages, all languages and a custom name, and returns to the subtitle tab after a choice. The "already in this language" notice is one line with an inline "Translate anyway".
+
+## 0.4.32 the caption list is no longer cut at twenty tracks (host package 0.4.49)
+
+With a Chinese interface YouTube orders an auto-dubbed video's 21 caption tracks so that English comes last, and the reader kept only the first 20 tracks. The default caption index then pointed past the list and the first track, Arabic, was read and translated (watch?v=JjbWhEVfOvA). Up to 60 tracks are kept now. When the default caption index is missing, the language of the original audio track (marked default in the streaming formats, e.g. "en-US.4") decides, then the caption track the player is showing.
+
+## 0.4.31 simpler subtitle controls (host package 0.4.48)
+
+The subtitle tab now starts with one switch, "Cindy subtitles". When it is on, "Show" offers Bilingual or Translation; turning it off remembers that choice for next time. Turning Cindy subtitles off no longer hides YouTube's own captions, and caption size and background are hidden while off. The subtitle language can be changed at any time, also when the captions are already in the chosen language; changing it re-checks whether translation is needed. The separate "Original only" mode is retired: a saved "original only" preference becomes off.
+
+## 0.4.30 captions are checked against the chosen language (host package 0.4.47)
+
+On a signed-in account the English track of watch?v=OVwWsdZ-fg8 still came back empty and the transcript-panel fallback returned Arabic, which was then translated. Every caption source (direct read, player-assisted read, transcript panel) is now checked against the chosen track's writing system; a mismatch moves on to the next source, and if all of them disagree the panel reports that YouTube returned captions in another language instead of translating them. The transcript panel is also pointed at the chosen track while it is read, and the player's own choice is restored afterwards.
+
+## 0.4.29 the player-assisted read only takes the track it asked for (host package 0.4.46)
+
+The track was chosen correctly (English), but the player-assisted read captured the first caption request the player made. YouTube remembers the last caption language per account, so a player that had been switched to Arabic requested Arabic first, and the English video was read and translated from Arabic (watch?v=OVwWsdZ-fg8). Only a request whose `lang` and `kind` match the chosen track is taken now. The player's own caption choice is still restored afterwards and never changed by Cindy.
+
+## 0.4.28 longer tasks, and a fresh task sees earlier wording (host package 0.4.45)
+
+A video's task now holds 100 passages (about 75 minutes of speech, roughly 150K tokens of history) instead of 60, which stays below the compaction threshold of any model with a 200K window or more; most videos fit in one task. When a task starts mid-video (a rollover, returning to a video whose task was archived, a plugin restart or model change), the full rules are accompanied by the last twelve captions already translated before the passage, so names and terms keep the wording used so far. Within a task they are not repeated. Needs extension 0.4.28; older extensions simply send no reference.
+
+## Subtitle rules travel once per task (host package 0.4.44)
+
+The 1.5K-character editing and translation rules were resent with every passage, roughly half of each passage's new input, and piled up in the task's history. They are now sent in full on a task's first passage; later passages carry a one-line reminder plus the passage. The full rules are sent again on a validation retry, after the task's model changes, when the rules themselves change (another target language), and every 20 passages, so a history the host has compacted gets them back. No extension update is needed.
+
+## 0.4.27 all-auto-generated track lists, and updates reach open pages (host package 0.4.43)
+
+YouTube now auto-generates a caption track per language on many videos, Arabic first, so "the auto-generated track" was Arabic again (watch?v=3pfnSu6HLB8 has twenty auto-generated tracks and no manual one). The default caption index of the video's default audio track is now the first signal; the single auto-generated track is only used when there is exactly one. After an extension update or reload the pages already open kept the previous, dead copy of the content script, so the toolbar button showed "!" and did nothing until the page was refreshed; the new copy is now injected into every open http(s) page on install and update, and the previous copy leaves.
+
+## Returning to a video no longer fails with TASK_BUSY (host package 0.4.42)
+
+Switching videos archived the previous video's task but kept its binding, so coming back to that video (or to one whose binding had been evicted, since the creation key was the same) read the archived task and failed with `TASK_BUSY`. Two browsers on two videos also retired each other's task because the "current video" was global. The lifecycle is now one rule: a browser that moves to another video archives the task it left once that task is idle and no other browser is still on the video, and forgets the binding. Any later request for a video without a live binding, or whose task is archived or gone for any reason, opens a fresh task under a new creation key; the key is persisted before the call so a lost receipt replays the same creation instead of minting a second task. Nothing is unarchived on the user's behalf. Positions are tracked per browser connection.
+
+## Binding survives a browser update that is not relaunched yet (host package 0.4.41)
+
+Chrome, Edge and Brave replace their bundle on disk while still running. Until the user relaunches, macOS dynamic validation of the live browser process reports "the code on disk does not match what is running", and the native host refused every binding, so the extension showed "Cindy is not connected yet" after any plugin restart until the browser was restarted. The native host now accepts that single condition when the running image carries one of the known browser identities (identifier plus team) and the executable it was started from still satisfies the full signing requirement. Every other validation failure is still refused; argv and ps paths are still never trusted.
+
+## 0.4.26 page UI survives extension updates (host package 0.4.40)
+
+After an extension update or reload, the copy of the content script still running in open tabs kept mounting its player entry and loading the Cindy icon from an extension URL, which Chrome logs as "Unsafe attempt to load URL chrome-extension://…/icons/48.png". A fresh copy now announces itself on the page and the old copy leaves at once, and the icon is inlined (no `web_accessible_resources` at all), so pages never load an extension URL and cannot detect the extension through one. The `'dns' requires dev channel` line on the extensions page is a manifest notice, not an error: the permission backs an optional DNS check that Chrome only exposes on the dev channel.
+
+## 0.4.25 caption track follows the spoken language (host package 0.4.39)
+
+English videos were sometimes read, and translated, from their Arabic captions. The reader asked for language `auto`, no track matched, and the fallback took "the first manual track"; YouTube lists tracks alphabetically by language, so that was often `ar`. The track is now chosen by the spoken language: the language of the auto-generated track, or of the caption the video's audio track points at by default. A manual track in that language wins, then the auto-generated one; an explicit language request is still honoured, and only a video with neither signal falls back to the first manual track. The player-assisted read also passes the track kind, so the manual and auto-generated tracks of one language are no longer confused.
+
+## One task and one cache per video, across browser profiles (host package 0.4.38)
+
+A video's background task and its subtitle cache are now keyed by the video alone (`youtube:<id>`, or the page URL without its fragment), no longer by the extension connection. Two connections watching the same video (two Chrome profiles, or a second copy of the extension) share one task and one cache instead of translating twice. Cache files move from `browser/<client-id>/subtitles/` to `browser/subtitles/`; videos cached before translate once more.
+
+## Subtitle cache file names (host package 0.4.37)
+
+Subtitle cache files are now named with a 48-character digest. The previous 64-character digest plus `.json` exceeded the host Library's 64-character segment limit, so every cache write was rejected with `PATH_INVALID` and translations were never reused. Existing videos translate once more and are cached from then on.
+
+## 0.4.24 connection guide (host package 0.4.37)
+
+When Cindy is not reachable, the panel shows a short guide in the browser's own language instead of one red sentence: what to do, an "Open Cindy" button (`cindy://focus`), "Open plugin settings" (`cindy://plugins/my-browser`, handled by Cindy hosts that ship this deep link; older hosts ignore it), "Check connection again", and a download link for people who have not installed Cindy yet. Nothing from the page is sent while disconnected.
+
+## 0.4.24 instant layer, background completion and whole-video brief (host package 0.4.37)
+
+- **Instant layer.** The caption read also fetches YouTube's own translation of the same track (`tlang=`, through the player's request). It is shown immediately, slightly lighter, wherever Cindy's translation is not ready yet, so playback never waits; each passage is replaced as Cindy's translation lands. Custom language names have no YouTube track and keep the previous behaviour.
+- **Background completion.** Once the look-ahead window is satisfied, one worker keeps translating ahead (next passage after the playhead first, then earlier ones, up to 30 minutes past the playhead) and caches it. Switch: Options → "Translate ahead" (off by default since 0.4.35).
+- **One task per video, in the background.** On hosts that grant `agent.hiddenTasks`, every video gets its own hidden translation task ("Subtitles · <video title>"), so a passage never carries another video's history and the task list stays untouched; the plugin page lists them under Background tasks. Switching videos archives the previous task when the host offers `archive`, the plugin keeps the 20 most recent bindings, and a long video rolls to a fresh task after 100 passages. Older hosts keep the single visible task.
+- **Lean requests.** Translation runs in one persistent Cindy task, so earlier passages and their wording are already in the model's context. Each passage now sends only the title and the few words before it (previously ±120 surrounding words, six earlier captions and the transcript opening). Background completion reaches at most 30 minutes past the playhead. On hosts that ship that default, the task follows the system auxiliary model, runs on the Pi harness when the model is offered there, and uses the lightest reasoning effort available.
+
+## 0.4.24 subtitle experience (host package 0.4.37)
+
+- Playback is no longer paused by default while subtitles are prepared. "Wait for subtitles before playing" is an explicit switch in the subtitle panel; when it holds playback, the player shows what it is waiting for.
+- Readiness is a single dot next to the panel title: pulsing while preparing, green when subtitles are ready, red for a problem (hover shows the word). Nothing else is shown by default; click the dot to open the full preparation card (progress, stage, cache state, codes), and problems open it automatically. Status lines are sentences, not counters: "Prepared to 3:20. Safe to keep watching.", a one-line cache warning, and error codes moved to a separate "Details" line.
+- When YouTube provides no captions, the panel explains it and offers "Turn on site captions, then retry" and "Import SRT / VTT" directly. Pages without any caption track reach the same state instead of waiting forever.
+- Automatically opened sessions whose captions already match the target language skip the model; "Translate anyway" is one click.
+- The panel is three short pages (Subtitles / Learning / Options) instead of one long scroll. Modes are grouped by cost (translate with the model / no translation); learning tools (previous, replay, next, speed, repeat, pause after line) are one level deep with their keyboard shortcuts shown, and the shortcuts work while the video is on screen.
+- The player entry is a caption glyph instead of an avatar; captions stay visible while the panel is open on wide players; the panel becomes a bottom drawer on narrow players; a light caption style is available.
+## 0.4.24 single player icon (host package 0.4.37)
+
+A running subtitle session owns the YouTube control bar: its settings toggle is the only Cindy icon there. YouTube fires `yt-navigate-finish` after an auto-started session may already be running; that event no longer re-inserts the separate entry icon beside the toggle. Update the Chrome extension to receive this fix. Permissions and the signed wire protocol remain unchanged.
+
+## New icon and description (host package 0.4.68)
+
+The plugin icon changes from the Cindy portrait to a Cindy-red browser window holding the toolbar's Cindy silhouette on a white tile, in the single-symbol style of the other official plugins, so it reads as the browser plugin in the plugin list. The description now leads with My browser: once it is selected in Cindy's Settings, the agent reads pages and acts for you with your existing sign-ins; translation, subtitles and PDF reading follow. The extension itself is unchanged and needs no update.
+
+## 0.4.48 recipe cookies stay on the operated site, review fixes (host package 0.4.69)
+
+- **Cookies through the debugger.** A site recipe's protocol session accepts only the DevTools methods Cindy's recipe runtime sends; anything else (for example `Network.getAllCookies` or `Runtime.evaluate`) is refused. Cookie reads cover the site of the tab being operated on only: `Network.getCookies` must name pages of that site, `Storage.getCookies` returns that site's cookies, and sites on the "Blocked from reading" list are never returned. Recorded network events no longer carry `Cookie` / `Set-Cookie` headers. "Same site" is the registrable domain, approximated without a public-suffix list (last two labels, or three under common public second levels such as `co.uk`, `com.cn`, `com.au`, `co.jp`); without a public-suffix list it can be off in either direction for unusual hosted domains.
+- **Subtitle tasks per tab.** The video a translation task follows is tracked per tab instead of per browser, so two tabs playing different videos no longer archive each other's task (and resend the full rules) on every passage.
+- **The page cannot remove Cindy's mark.** A page script could dispatch the event a reloaded content script uses to retire its predecessor. The event now only retires a copy whose extension context is gone; the live one ignores it.
+- Serbian and Kazakh captions in Latin script are no longer refused as the wrong language. The reading panel's model hint points to the plugin's "Model & tasks" setting in Cindy. The tab-limit message states the real limit (12).
+- The plugin no longer treats a transient refusal from Cindy's browser-extension slot as an older host, so it does not start its own bridge next to Cindy's; only an older host's rejection of the pipe type selects the bundled bridge.
+- **Site lists accept intranet hosts.** Local and private addresses and single-label intranet names such as `jira` or `localhost` can be listed, so an intranet site can be blocked on its own (they have been reachable like any site since October 28).
+- **Cindy asks for permissions when it has none cached.** The host refuses page jobs until it has this plugin's stored site permissions and sends a request event; the plugin pushes its permissions and paired browsers at once.
+- **No acting on the wrong tab after a browser restart.** The extension sends a per-launch id with each connection. Tab numbers start over when the browser restarts, so Cindy forgets the tabs it remembered and never applies an old number to a tab you restored.
+
+Update both the Cindy plugin and the Chrome extension. Permissions and the signed wire protocol are unchanged.
+
+## 0.4.49 merged with the selection-button option (host package 0.4.70)
+
+Brings in the "Show Cindy button when selecting text" setting (off by default) from the main branch. No other behavior change.
+
+## 0.4.50 review fixes: uncertain results, last authorization check, tab budget (host package 0.4.71)
+
+- **A script that started is never reported as not run.** `evaluate` returns "not executed" only when the page's Content Security Policy rejects the script before anything ran; an error after the function started, or a debugger command that timed out or lost its connection after being sent, now reports an unknown result, so the page is checked before repeating it and the function is not run a second time through the debugger.
+- **Revoked permissions stop the remaining actions.** Opening a page, navigating by tab, closing, resizing, focusing, waiting, screenshots, PDF, recipe commands and the main-world actions (`evaluate`, `console`, `requests`, `responseBody`, `dialog`) now take the last authorization check and register as a dispatch, so a site permission revoked after the acknowledgement refuses them or waits for the one already started.
+- **`open` shares the 12-tab budget** with page reads, and opening an address again no longer overwrites the record of the earlier tab, so idle tabs can still be reclaimed.
+- **Turning Cindy subtitles off restores the site's own caption track** instead of keeping it hidden.
+
+## 0.4.51 changing the subtitle language mid-request (host package 0.4.72)
+
+- A caption reply that arrives after the subtitle language was changed is dropped and read again for the new language, instead of being shown (and cached as complete) under the new language.
+
+## 0.4.52 no fixed tab limit, local pages described correctly (host package 0.4.73)
+
+- **No fixed tab limit.** Like Cindy's own browser, pages the agent opens are no longer capped at 12. Tabs Cindy opened still close by themselves after 10 idle minutes.
+- **Tool descriptions match what the tools do.** The `browser_read` and `browser_tabs` descriptions and the manual now say that local and intranet pages are read and listed like any site unless blocked (reachable since October 28), and no longer mention a tab limit.
+
+## 0.4.53 navigation checks the target address (host package 0.4.74)
+
+- **The last authorization check before navigating covers the address being opened**, not only the page the tab shows now, so a site permission revoked after the acknowledgement stops the navigation itself.
+- Tabs Cindy opened are all remembered for the "user took over" handling; the list is no longer cut to the last 200 now that opening is not capped.
+
+## 0.4.54 no site lists (host package 0.4.75)
+
+- **No site lists of our own.** The agent already has broad access on the computer, so My browser no longer keeps its own lists: the "Blocked from reading" list, the per-site interaction setting and the `browser_policy` tool are removed, and site recipes may send any DevTools command and read cookies without a per-site filter. Safety is the task's permission mode and review in Cindy, as in Cindy's own browser. Restrictions saved by older versions stay in storage unused; recorded network events still drop raw `Cookie` / `Set-Cookie` headers, and links in results still have their tokens masked.
+- With no lists to revoke, the final authorization checks added in 0.4.50 and 0.4.53 and the bundled bridge's revocation handling are gone too.
+
+## 0.4.55 activity mark after a failed screenshot (host package 0.4.76)
+
+- When a screenshot fails, Cindy's "operating this page" mark comes back instead of staying hidden.
+
+## 0.4.56 larger uploads through the debugger (host package 0.4.77)
+
+- **Uploads are no longer limited to about 30 MB once the debugger is allowed.** Newer Cindy sends the checked file paths along with the upload, and the extension has Chrome read the files straight from the computer through its debugger, as Cindy's own browser does. Without the debugger, files that fit still go the plain way; a larger batch opens the page to allow the debugger. The debugger explanation page lists this use.
+
+## 0.4.57 no capability limits of our own (host package 0.4.78)
+
+- **The agent can do what it does in Cindy's own browser.** Password, payment and one-time-code fields can be read and filled; links, tab lists and read results keep their URLs whole (magic and signed links work); extract accepts any attribute; recorded network events keep their headers. Safety is the task's permission mode and review in Cindy. Hidden inputs still stay out of reads, and nothing steals focus or switches the tab you are looking at.
+
+## 0.4.58 upload from network shares, steadier consecutive screenshots (host package 0.4.79)
+
+- Upload paths accept Windows network shares (`\\server\share\file`) as well as drive and POSIX paths.
+- A debugger screenshot waits for Cindy's window to go back to minimized before it finishes, so the next screenshot does not start while the window is still moving.
+
+## 0.4.59 tool descriptions match the open abilities; takeover and language fixes (host package 0.4.80)
+
+- Tool descriptions, the plugin description and the settings privacy note no longer say that password/payment fields are unsupported, that interaction needs a site grant, or that cookies cannot be read; they state what the plugin does now.
+- A page opened by a read (older Cindy) joins the agent's tabs like one opened with `open`, so a user who takes it over keeps it instead of having it reclaimed as idle.
+- Changing the subtitle language in another tab re-judges "already in this language" on this one, so a page that skipped translation starts translating.
+
+## 0.4.60 another debugger holding the tab fails the attach (host package 0.4.81)
+
+- When DevTools or another extension already holds a tab's debugger, attaching now fails with the usual "Chrome refused to attach" message instead of pretending to be attached. Only the extension's own leftover attachment (after the worker restarted) is accepted.

@@ -2,9 +2,9 @@
   "schemaVersion": 3,
   "id": "my-browser",
   "name": "Cindy Chrome",
-  "description": "Cindy’s browser companion: bilingual webpages, contextual explanations, automatic in-player subtitles, PDF/OCR and browser control. Page text goes to your configured AI; cookies are not exported.",
-  "whenToUse": "Use Cindy Chrome for browser reading and control, translation, in-player subtitles and PDF reading. Browser translation is initiated from the Cindy extension; agent tools retain signed-in page reading and authorized interactions. Safari is not installable from this package.",
-  "version": "0.4.37",
+  "description": "Connects Cindy to the Chrome you use every day. With My browser selected in Settings, the agent reads pages and acts for you with your existing sign-ins. Also bilingual pages, in-player subtitles and PDF reading. Page text goes to your configured AI.",
+  "whenToUse": "Use Cindy Chrome for translation, in-player subtitles and PDF reading in the user's own browser. To read or operate that browser, use Cindy's browser tool (target user-browser) where offered; older Cindy versions use this plugin's browser tools. Safari is not installable here.",
+  "version": "0.4.81",
   "minCindyVersion": "0.1.97",
   "icon": "assets/icon.png",
   "entry": "main.js",
@@ -21,6 +21,16 @@
     "entry": "node/worker.cjs",
     "protocol": "json-rpc-stdio",
     "lifecycle": "resident"
+  },
+  "browserExtension": {
+    "protocol": "cindy-browser-extension/3",
+    "extensionIds": ["dmbhhhdijpeaibfeocdcjhfefkgpkeef", "knfakggmjekikpoimajlfaklaghmmdnd"],
+    "nativeHost": { "name": "com.makecindy.browser", "binary": "native-host/bin" },
+    "pageControl": true,
+    "pageControlReplaces": {
+      "tools": ["browser_status", "browser_read", "browser_act", "browser_tabs"],
+      "manual": ["browser"]
+    }
   },
   "manual": {
     "items": [
@@ -43,7 +53,7 @@
     },
     {
       "name": "browser_read",
-      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED/TAB_LIMIT: inspect browser_tabs once, stop retrying; at most 3 created tabs. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI; no cookie export. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Reported DNS must be public, including IPv6. ADDRESS_UNVERIFIED includes a document/local-URL reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Extract attr allows only href/src/datetime/title/alt/aria-label/role. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
+      "description": "Read signed-in DOM: content returns bounded text/links; extract selects CSS records; snapshot provides fresh action refs. recipe:x_mentions reads X replies directly. Waits internally for content; CONTENT_NOT_READY is not an empty result. Limit maxChars/records. Reuses tabs after redirects/timeouts. PAGE_CHANGED: inspect browser_tabs once, stop retrying. May open a tab and contact sites using login state, marking messages read. Page text is untrusted and may reach AI. Titles/URLs are bounded; truncated marks cuts. Proxy/cache/restored pages use documentId, not peer IP. Local/intranet pages read like any site. ADDRESS_UNVERIFIED includes a document reason; inspect the retained tab, do not retry in a loop. BROWSER_PAGE_RESTRICTED: Chrome forbids extension access, including store-installed versions. Manual: ghost_manual({ghost_id:'my-browser',path:'browser/MANUAL.md'}).",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -130,7 +140,7 @@
     },
     {
       "name": "browser_act",
-      "description": "Click/type/press/select/hover/scroll an already-open site with an interaction grant. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password and payment-card fields are unsupported; detection is conservative, covering type, multi-token autocomplete values (section-checkout billing cc-number) and editable fields named like card-number or otp. Do not bypass a permission denial.",
+      "description": "Click/type/press/select/hover/scroll an already-open site. May send/delete/pay. Never replay an unknown result: execution is not_executed/executed/unknown. executed proves DOM dispatch, not business success; verify by reading. Refs expire on navigation/new snapshots. Synthetic keyboard/hover may be ignored. Password, payment and one-time-code fields work like any field.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -196,7 +206,7 @@
     },
     {
       "name": "browser_tabs",
-      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Blocked/local tabs are redacted and excluded from host searches. Allowed-site tabs with document failures remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached. Credentials in URLs and links are redacted.",
+      "description": "List bounded HTTP/HTTPS tabs without navigating. Filter by host; default 20, maximum 100. Local and intranet tabs are listed like any site. Tabs whose document cannot be read remain listed with status/error/reason but no title or URL. truncated means a count/size limit was reached.",
       "parameters": {
         "type": "object",
         "additionalProperties": false,
@@ -217,32 +227,6 @@
           }
         }
       }
-    },
-    {
-      "name": "browser_policy",
-      "description": "Get/update site permissions. allow_interact permits all site clicks/forms; block_read prevents reads and interaction; remove removes the read block, interaction allow entry and interaction exclusion. Domains include subdomains (= means exact). New grants/unblocking require real Cindy confirmation; cancellation changes nothing. Never retry cancelled grants. New installations allow all public sites; saved restrictions remain until explicitly removed. Use host * for all-site interaction.",
-      "parameters": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "get",
-              "allow_interact",
-              "block_read",
-              "remove"
-            ]
-          },
-          "host": {
-            "type": "string",
-            "maxLength": 254
-          }
-        },
-        "required": [
-          "action"
-        ]
-      }
     }
   ],
   "setup": {
@@ -251,7 +235,8 @@
   "launch": "resident",
   "library": true,
   "agent": {
-    "tasks": true
+    "tasks": true,
+    "hiddenTasks": true
   },
   "network": {
     "hosts": [

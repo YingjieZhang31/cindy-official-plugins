@@ -33,7 +33,7 @@ function fixture(send=async()=>({enabled:false}),preferences={}){
   document.createElement=document.createElementNS=()=>new Node();document.documentElement=new Node();document.body=new Node();
   function setPreferences(value){const oldValue=stored;stored={...value};for(const fn of storageListeners)fn({cindyReadingPreferences:{oldValue,newValue:stored}},'local');}
   const chrome={runtime:{id:'fixture',getURL:p=>'chrome-extension://fixture/'+p,sendMessage:m=>{sent.push(m);return send(m);},onMessage:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)}},storage:{local:{get:async()=>({cindyReadingPreferences:{...stored}}),set:async data=>setPreferences(data.cindyReadingPreferences)},onChanged:{addListener:fn=>storageListeners.add(fn),removeListener:fn=>storageListeners.delete(fn)}}};
-  const context={chrome,document,window:new EventTarget(),location:{href:'https://example.test/start',hostname:'example.test',origin:'https://example.test'},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
+  const context={chrome,document,Event,window:new EventTarget(),location:{href:'https://example.test/start',hostname:'example.test',origin:'https://example.test'},AbortController,getComputedStyle:()=>({backgroundColor:'rgb(255,255,255)'}),CindyLearning:{uuid:()=> 'fixture-request-'+(++sequence),validTarget:()=>false,languageName:v=>v},CindyUI:{copy:()=>({close:"Close"}),css:'',languagePicker:()=>new Node(),error:()=>'err'},speechSynthesis:{cancel(){}},MutationObserver:class{observe(){} disconnect(){}},setInterval:fn=>{timers.set(++sequence,fn);return sequence;},clearInterval:id=>timers.delete(id),clearTimeout(){},setTimeout};
   vm.runInNewContext(source,context);
   return {chrome,context,timers,sent,listeners,nodes,documentHandlers,setPreferences,preferences:()=>stored};
 }
@@ -125,6 +125,18 @@ test('a reloaded extension leaves no URL polling or page listeners after runtime
   assert.doesNotThrow(tick);assert.equal(f.timers.size,0);
   const count=f.sent.length;f.context.document.dispatchEvent(new Event('yt-navigate-finish'));tick();await settle();
   assert.equal(f.sent.length,count,'invalidated script never sends again');
+});
+// Bug regression (review 2026-10-29): any page script could dispatch the start event and make the
+// live content script tear itself down (the "Cindy is operating this page" mark vanished until reload).
+test('a forged start event cannot retire a live content script; an orphaned copy still leaves',async()=>{
+  const f=fixture();await settle();
+  assert.equal(f.timers.size,1);assert.equal(f.listeners.size,1);
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));await settle();
+  assert.equal(f.timers.size,1,'the live copy keeps polling');assert.equal(f.listeners.size,1,'and keeps its runtime listener');
+  // After an extension reload this copy's context is gone: the new copy's announcement retires it at once.
+  f.chrome.runtime=undefined;
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));
+  assert.equal(f.timers.size,0);
 });
 test('synchronous invalidation during video-state send is caught and disposes the old script',async()=>{
   let invalidate=false;const f=fixture(()=>{if(invalidate)throw Error('Extension context invalidated.');return Promise.resolve({enabled:false});});await settle();
@@ -316,4 +328,22 @@ test('hiding the panel while config is pending drops queued translate-page',asyn
   resolveConfig({ok:true,locale:'en',features:[]});
   await settle();await settle();await settle();
   assert.equal(observed.length,0,'closed panel must not start queued translation');
+});
+
+test('a newer copy of the content script announcing itself disposes the running one',async()=>{
+  // Bug regression (2026-10-28): after an extension reload the old copy kept mounting player entries.
+  // The reload invalidates the old copy's extension context; the new copy's announcement then retires it
+  // at once instead of on its next poll.
+  const f=fixture();await settle();assert.equal(f.timers.size,1);
+  f.chrome.runtime=undefined;
+  f.context.document.dispatchEvent(new Event('cindy-content-script-start'));
+  assert.equal(f.timers.size,0);
+});
+test('the brand icon is inlined and no extension resource is web-accessible',async()=>{
+  const manifest=JSON.parse(await fs.readFile(new URL('../my-browser/extension/manifest.json',import.meta.url),'utf8'));
+  assert.equal(manifest.web_accessible_resources,undefined);
+  assert.equal(manifest.content_scripts[0].js[0],'brand-icon.js');
+  const icon=await fs.readFile(new URL('../my-browser/extension/brand-icon.js',import.meta.url),'utf8');
+  assert.match(icon,/globalThis\.CindyBrandIcon='data:image\/png;base64,[A-Za-z0-9+\/=]+'/);
+  assert.match(source,/globalThis\.CindyBrandIcon\|\|api\.runtime\.getURL/);
 });
